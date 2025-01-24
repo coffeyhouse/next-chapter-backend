@@ -1,0 +1,19 @@
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ignore environment and dependency files
+env/
+*.env
+
+# Ignore data exports or generated files
+data/exported_html/
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+
+# Ignore IDE configurations
+.vscode/
+.idea/
