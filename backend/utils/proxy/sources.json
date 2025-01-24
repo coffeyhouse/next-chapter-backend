@@ -1,0 +1,11 @@
+[
+    {
+        "source": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=1000",
+        "pattern": "([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}):(\\d+)",
+        "is_json": false
+    },
+    {
+        "source": "https://proxylist.geonode.com/api/proxy-list?limit=100&page=1",
+        "is_json": true
+    }
+]
