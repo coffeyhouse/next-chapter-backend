@@ -1,7 +1,8 @@
 from pathlib import Path
 from bs4 import BeautifulSoup
-import json
+import sys
 import re
+from backend.utils.data_transformer import transform_series_data, print_transformed_data
 from backend.utils.downloader import GoodreadsDownloader
 
 example_html_dir = Path('exported_html/series')
@@ -140,32 +141,12 @@ def scrape_series(series_id):
         return None
 
 def main():
-    import sys
-    
     if len(sys.argv) != 2:
         print("Usage: python -m backend.scrapers.series <series_id>")
         sys.exit(1)
         
     series_id = sys.argv[1]
-    series_info = scrape_series(series_id)
-    
-    if series_info:
-        print("\n" + "=" * 80)
-        print(f"Name:{'':<9} {series_info['name']}")
-        print(f"ID:{'':<11} {series_info['id']}")
-        if series_info['books']:
-            first_book = True
-            for book in series_info['books']:
-                book_str = f"{book['title']} (ID: {book['id']})"
-                if book['number'] is not None:
-                    book_str += f" - Book {book['number']}"
-                
-                if first_book:
-                    print(f"Books:{'':<9} {book_str}")
-                    first_book = False
-                else:
-                    print(f"{'':<15} {book_str}")
-        print("=" * 80)
+    scrape_series(series_id)
 
 if __name__ == "__main__":
     main()

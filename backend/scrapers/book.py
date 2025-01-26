@@ -5,6 +5,7 @@ import re
 import json
 import time
 from backend.utils.downloader import GoodreadsDownloader
+from backend.utils.image_downloader import download_book_cover
 
 def extract_series(soup):
     series_info = {"name": "", "number": None, "id": None}
@@ -252,7 +253,7 @@ def extract_additional_series(soup, main_series_id=None):
     
     return additional_series
 
-def extract_editions_url(soup):
+def extract_work_id(soup):
     next_data = soup.find('script', id='__NEXT_DATA__')
     if next_data:        
         try:
@@ -260,16 +261,10 @@ def extract_editions_url(soup):
             for key, value in data['props']['pageProps']['apolloState'].items():
                 if isinstance(value, dict) and 'editions' in value:
                     if value['editions'].get('webUrl'):
-                        return value['editions']['webUrl']
+                        # Extract work ID from the editions URL
+                        return value['editions']['webUrl'].split('/')[-1].split('-')[0]
         except (json.JSONDecodeError, KeyError, AttributeError):
             pass
-    return None
-
-def extract_similar_books_url(editions_url):
-    if editions_url:
-        # Extract the work ID from the editions URL
-        work_id = editions_url.split('/')[-1].split('-')[0]
-        return f"https://www.goodreads.com/book/similar/{work_id}?ref=rae_seeall"
     return None
 
 def extract_description(soup):
@@ -285,6 +280,25 @@ def extract_description(soup):
             pass
     return None
 
+def extract_book_cover_url(soup):
+    """Extract the book cover image URL from a book page"""
+    # Try class ResponsiveImage first
+    img = soup.find('img', {'class': 'ResponsiveImage'})
+    if img and 'src' in img.attrs:
+        return img['src']
+        
+    # Try schema.org metadata as fallback
+    schema_script = soup.find('script', {'type': 'application/ld+json'})
+    if schema_script:
+        try:
+            data = json.loads(schema_script.string)
+            if 'image' in data:
+                return data['image']
+        except json.JSONDecodeError:
+            pass
+            
+    return None
+
 def get_book_url(book_id):
     return f"https://www.goodreads.com/book/show/{book_id}"
 
@@ -298,7 +312,6 @@ def scrape_book(book_id):
     # Download the HTML content
     success = downloader.download_url(url)
     if not success:
-        print(f"Failed to download book ID: {book_id}")
         return None
         
     # Construct the path where the file was saved
@@ -320,16 +333,19 @@ def scrape_book(book_id):
             'genres': extract_genres(soup),
             'publication': extract_publication_info(soup),
             'details': extract_book_details(soup),
-            'editions_url': extract_editions_url(soup),
-            'description': extract_description(soup)
+            'description': extract_description(soup),
+            'similar_books_id': extract_work_id(soup)
         }
         
         # Add series information
         main_series_id = book_info['title']['series'].get('id') if book_info['title']['series'] else None
-        book_info['additional_series'] = extract_additional_series(soup, main_series_id)
+        book_info['additional_series'] = extract_additional_series(soup, main_series_id)        
         
-        # Add similar books URL
-        book_info['similar_books_url'] = extract_similar_books_url(book_info['editions_url'])
+        cover_url = extract_book_cover_url(soup)
+        if cover_url:
+            local_path = download_book_cover(book_id, cover_url)
+            if local_path:
+                book_info['image_url'] = local_path
         
         return book_info
         
@@ -337,7 +353,7 @@ def scrape_book(book_id):
         print(f"Error processing book ID {book_id}: {str(e)}")
         return None
 
-def main():
+if __name__ == "__main__":
     import sys
     
     if len(sys.argv) != 2:
@@ -345,78 +361,4 @@ def main():
         sys.exit(1)
         
     book_id = sys.argv[1]
-    book_info = scrape_book(book_id)
-    
-    if book_info:
-        print("\n" + "=" * 80)
-        print(f"{'Title:':<15} {book_info['title']['title']}")
-        print(f"{'ID:':<15} {book_info['id'] if book_info['id'] else 'Not found'}")
-        
-        if book_info['title']['series'] and book_info['title']['series']['name']:
-            series_text = f"{book_info['title']['series']['name']}"
-            if book_info['title']['series']['id']:
-                series_text += f" (ID: {book_info['title']['series']['id']})"
-            if book_info['title']['series']['number']:
-                series_text += f" #{book_info['title']['series']['number']}"
-            print(f"{'Series:':<15} {series_text}")
-            
-        if book_info['additional_series']:
-            print(f"{'Alt Series:':<15} {', '.join(f'{series['name']} (ID: {series['id']})' for series in book_info['additional_series'])}")
-            
-        if book_info['authors']:
-            first_author = True
-            for author in book_info['authors']:
-                author_str = f"{author['name']} (ID: {author['id']}) ({author['role']})"
-                if first_author:
-                    print(f"{'Authors:':<15} {author_str}")
-                    first_author = False
-                else:
-                    print(f"{'':<15} {author_str}")
-        if book_info['genres']:
-            print(f"{'Genres:':<15} {', '.join(genre['name'] for genre in book_info['genres'])}")
-        
-        if book_info['publication']['date']:
-            status = "Expected: " if book_info['publication']['status'] == 'upcoming' else "Published: "
-            print(f"{'Publication:':<15} {status}{book_info['publication']['date']}")
-            
-        details = book_info['details']
-        if details['language']:
-            print(f"{'Language:':<15} {details['language']}")
-        if details['pages']:
-            print(f"{'Pages:':<15} {details['pages']}")
-        if details['isbn']:
-            print(f"{'ISBN:':<15} {details['isbn']}")
-        if details['rating']:
-            print(f"{'Rating:':<15} {details['rating']} ({details['rating_count']:,} ratings)")
-            
-        if details['awards']:
-            first_award = True
-            for award in details['awards']:
-                award_text = f"{award['name']}"
-                if award['id']:
-                    award_text += f" (ID: {award['id']})"
-                if award['category']:
-                    award_text += f" ({award['category']})"
-                if award['year']:
-                    award_text += f" ({award['year']})"
-                if award['designation'] and award['designation'] != "NOMINEE":
-                    award_text += f" ({award['designation']})"
-                
-                if first_award:
-                    print(f"{'Awards:':<15} {award_text}")
-                    first_award = False
-                else:
-                    print(f"{'':<15} {award_text}")
-                    
-        if book_info['editions_url']:
-            print(f"{'Editions:':<15} {book_info['editions_url']}")
-        if book_info['similar_books_url']:
-            print(f"{'Similar:':<15} {book_info['similar_books_url']}")
-        if book_info['description']:
-            truncated_desc = book_info['description'][:100] + "..." if len(book_info['description']) > 100 else book_info['description']
-            print(f"{'Description:':<15} {truncated_desc}")
-            
-        print("=" * 80)
-
-if __name__ == "__main__":
-    main()
+    scrape_book(book_id)  # Just scrape, no printing

@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import json
 import re
 from backend.utils.downloader import GoodreadsDownloader
+import sys
+from backend.utils.data_transformer import transform_similar_data, print_transformed_data
 
 def get_similar_url(book_id):
     return f"https://www.goodreads.com/book/similar/{book_id}"
@@ -76,24 +78,12 @@ def scrape_similar(book_id):
         return None
 
 def main():
-    import sys
-    
     if len(sys.argv) != 2:
         print("Usage: python -m backend.scrapers.similar <book_id>")
         sys.exit(1)
         
     book_id = sys.argv[1]
-    result = scrape_similar(book_id)
-    
-    if result:
-        main_book, similar_books = result
-        print("\n" + "=" * 80)
-        if main_book:
-            print(f"Book:{'':<10} {main_book['title']} (ID: {main_book['id']})")
-            print(f"Similar:{'':<7} {len(similar_books)} books found")
-            for book in similar_books:
-                print(f"{'':<15}{book['title']} (ID: {book['id']})")
-        print("=" * 80)
+    scrape_similar(book_id)
 
 if __name__ == "__main__":
     main() 

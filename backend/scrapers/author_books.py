@@ -4,8 +4,7 @@ import json
 import re
 from backend.utils.downloader import GoodreadsDownloader
 from urllib.parse import urlencode
-
-example_html_dir = Path('data/exported_html/author/list')
+from backend.utils.data_transformer import transform_author_books_data, print_transformed_data
 
 def get_author_books_url(author_id, page=1):
     base_url = f"https://www.goodreads.com/author/list/{author_id}"
@@ -16,13 +15,6 @@ def get_author_books_url(author_id, page=1):
         'sort': 'original_publication_year'
     }
     return f"{base_url}?{urlencode(params)}"
-
-def extract_author_id_from_url(file_path):
-    # Updated pattern to handle filenames without a dot after the ID
-    id_match = re.search(r'(\d+)(?:\.|\D)', file_path.name)
-    if id_match:
-        return id_match.group(1)
-    return None
 
 def extract_author_name(soup):
     name_link = soup.find('a', class_='authorName')
@@ -54,11 +46,11 @@ def extract_books(soup):
             if 'expected publication' in text_content:
                 year_match = re.search(r'expected publication\s*(\d{4})', text_content)
                 if year_match:
-                    book['publication'] = f"Expected: {year_match.group(1)}"
+                    book['publication'] = year_match.group(1)
             elif 'published' in text_content:
                 year_match = re.search(r'published\s*(\d{4})', text_content)
                 if year_match:
-                    book['publication'] = f"Published: {year_match.group(1)}"
+                    book['publication'] = year_match.group(1)
         
         if book['id'] and book['title']:
             books.append(book)
@@ -68,10 +60,8 @@ def extract_books(soup):
 def extract_pagination_info(soup):
     pagination = {'current_page': 1, 'total_pages': 1}
     
-    # Find pagination div that has the float: right style
     pagination_div = soup.find('div', style='float: right')
     if pagination_div:
-        # Get current page from the em element with class="current"
         current = pagination_div.find('em', class_='current')
         if current:
             try:
@@ -79,7 +69,6 @@ def extract_pagination_info(soup):
             except ValueError:
                 pass
         
-        # Get all page links
         page_links = pagination_div.find_all('a')
         max_page = 1
         
@@ -110,7 +99,7 @@ def scrape_author_books(author_id):
             print(f"Failed to download page {current_page} for author ID: {author_id}")
             break
         
-        # Construct the path where the file was saved - matching the downloader's format
+        # Construct the path where the file was saved
         query_params = f"page={current_page}&per_page=100&utf8=%E2%9C%93&sort=original_publication_year"
         local_path = Path('data/exported_html/author/list') / f"{author_id}{query_params}.html"
         
@@ -143,11 +132,14 @@ def scrape_author_books(author_id):
         except Exception as e:
             print(f"Error processing page {current_page} for author ID {author_id}: {str(e)}")
             break
+        
+    # Filter to only include books with publication data
+    published_books = [book for book in all_books if book['publication'] is not None]
     
     return {
         'author_name': author_name,
         'author_id': author_id,
-        'books': all_books
+        'books': published_books
     }
 
 def main():
@@ -158,22 +150,7 @@ def main():
         sys.exit(1)
         
     author_id = sys.argv[1]
-    result = scrape_author_books(author_id)
-    
-    if result:
-        # Filter books with publication info
-        published_books = [book for book in result['books'] if book['publication']]
-        
-        print("\n" + "=" * 80)
-        print(f"{'Author:':<15}{result['author_name']}")
-        print(f"{'ID:':<15}{result['author_id']}")
-        
-        # Only print books that have publication info
-        for book in published_books:
-            book_info = f"{book['title']} (ID: {book['id']}) - {book['publication']}"
-            print(f"{'':<15}{book_info}")
-        print(f"{'Books:':<15}{len(published_books)} published ({len(result['books'])} found)")
-        print("=" * 80)
+    scrape_author_books(author_id)
 
 if __name__ == "__main__":
-    main() 
+    main()
