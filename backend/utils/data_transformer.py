@@ -3,7 +3,7 @@ from typing import Dict, List, Any, Optional
 
 # Define default table schemas
 DEFAULT_BOOK = {
-    'goodreads_id': None,
+    'goodreads_id': None,  # This will be the raw ID from Calibre
     'title': None,
     'published_date': None,
     'published_state': None,
@@ -18,6 +18,16 @@ DEFAULT_BOOK = {
     'similar_books_id': None,
     'source': None,
     'hidden': False,
+    'created_at': None,
+    'updated_at': None,
+    'last_synced_at': None
+}
+
+DEFAULT_LIBRARY = {
+    'title': None,
+    'calibre_id': None,
+    'goodreads_id': None,
+    'isbn': None,
     'created_at': None,
     'updated_at': None,
     'last_synced_at': None
@@ -136,9 +146,10 @@ def transform_book_data(book_info: Dict[str, Any]) -> Dict[str, List[Dict]]:
     """Transform book data into database table format"""
     now = datetime.now().isoformat()
     
-    # Initialize tables with empty lists
+    # Initialize tables
     tables = {
         'book': [],
+        'library': [],
         'series': [],
         'book_series': [],
         'author': [],
@@ -149,197 +160,211 @@ def transform_book_data(book_info: Dict[str, Any]) -> Dict[str, List[Dict]]:
         'book_award': [],
         'similar_book': [],
         'book_editions': [],
-        'library': [],
         'user': [],
         'book_user': []
     }
     
-    # Handle simplified library source data
-    if 'source' in book_info and book_info['source'] == 'library':
-        tables['book'].append(create_record(
-            DEFAULT_BOOK,
+    # Extract title from title object if it's a dict
+    title = book_info['title']['title'] if isinstance(book_info['title'], dict) else book_info['title']
+    
+    # Process book data
+    book_record = {
+        'goodreads_id': book_info.get('id'),
+        'title': title,
+        'calibre_id': book_info.get('calibre_id'),
+        'source': book_info.get('source'),
+        'last_synced_at': now  # Always update last_synced_at
+    }
+    
+    # Add additional fields if they exist
+    if 'publication' in book_info:
+        book_record.update({
+            'published_date': book_info['publication'].get('date'),
+            'published_state': book_info['publication'].get('status')
+        })
+    
+    if 'details' in book_info:
+        book_record.update({
+            'language': book_info['details'].get('language'),
+            'pages': book_info['details'].get('pages'),
+            'isbn': book_info['details'].get('isbn'),
+            'goodreads_rating': book_info['details'].get('rating'),
+            'goodreads_votes': book_info['details'].get('rating_count'),
+            'hidden': book_info['details'].get('language') is None or 
+                     book_info['details'].get('language', '').lower() != 'english'
+        })
+    
+    if 'description' in book_info:
+        book_record['description'] = book_info['description']
+    
+    if 'image_url' in book_info:
+        book_record['image_url'] = book_info['image_url']
+        
+    if 'similar_books_id' in book_info:
+        book_record['similar_books_id'] = book_info['similar_books_id']
+    
+    tables['book'].append(create_record(DEFAULT_BOOK, book_record, now))
+    
+    # Add library record if it's a library source
+    if book_info.get('source') == 'library':
+        tables['library'].append(create_record(
+            DEFAULT_LIBRARY,
             {
-                'goodreads_id': book_info['id'],
-                'title': book_info['title'],
-                'calibre_id': book_info['calibre_id'],
-                'source': book_info['source'],
-                'last_synced_at': None
+                'title': title,
+                'calibre_id': book_info.get('calibre_id'),
+                'goodreads_id': book_info.get('id'),
+                'isbn': book_info.get('isbn'),
+                'last_synced_at': now
             },
             now
         ))
-        return tables
     
-    # Process book data
-    tables['book'].append(create_record(
-        DEFAULT_BOOK,
-        {
-            'goodreads_id': book_info['id'],
-            'title': book_info['title']['title'],
-            'published_date': book_info['publication']['date'],
-            'published_state': book_info['publication']['status'],
-            'language': book_info['details']['language'],
-            'pages': book_info['details']['pages'],
-            'isbn': book_info['details']['isbn'],
-            'goodreads_rating': book_info['details']['rating'],
-            'goodreads_votes': book_info['details']['rating_count'],
-            'description': book_info['description'],
-            'image_url': book_info['image_url'],
-            'similar_books_id': book_info.get('similar_books_id'),
-            'hidden': book_info['details']['language'] is None or book_info['details']['language'].lower() != 'english',
-            'last_synced_at': now
-        },
-        now
-    ))
+    # Process series information
+    if isinstance(book_info['title'], dict) and book_info['title'].get('series'):
+        series_info = book_info['title']['series']
+        if series_info.get('id') and series_info.get('name'):
+            tables['series'].append(create_record(
+                DEFAULT_SERIES,
+                {
+                    'goodreads_id': series_info['id'],
+                    'title': series_info['name'],
+                    'last_synced_at': None
+                },
+                now
+            ))
+            
+            tables['book_series'].append(create_record(
+                DEFAULT_BOOK_SERIES,
+                {
+                    'book_id': book_info['id'],
+                    'series_id': series_info['id'],
+                    'series_order': series_info.get('number')
+                },
+                now
+            ))
     
-    # Add user records if they don't exist
-    warren_user = create_record(
-        DEFAULT_USER,
-        {
-            'id': 1,
-            'name': 'Warren'
-        },
-        now
-    )
+    # Process additional series
+    for series in book_info.get('additional_series', []):
+        if series.get('id') and series.get('name'):
+            tables['series'].append(create_record(
+                DEFAULT_SERIES,
+                {
+                    'goodreads_id': series['id'],
+                    'title': series['name'],
+                    'last_synced_at': now
+                },
+                now
+            ))
+            
+            tables['book_series'].append(create_record(
+                DEFAULT_BOOK_SERIES,
+                {
+                    'book_id': book_info['id'],
+                    'series_id': series['id']
+                },
+                now
+            ))
     
-    ruth_user = create_record(
-        DEFAULT_USER,
-        {
-            'id': 2,
-            'name': 'Ruth'
-        },
-        now
-    )
-    tables['user'].extend([warren_user, ruth_user])
+    # Process authors
+    for author in book_info.get('authors', []):
+        if author.get('id') and author.get('name'):
+            tables['author'].append(create_record(
+                DEFAULT_AUTHOR,
+                {
+                    'goodreads_id': author['id'],
+                    'name': author['name'],
+                    'last_synced_at': None
+                },
+                now
+            ))
+            
+            tables['author_book'].append(create_record(
+                DEFAULT_AUTHOR_BOOK,
+                {
+                    'book_id': book_info['id'],
+                    'author_id': author['id'],
+                    'role': author.get('role', 'Author')
+                },
+                now
+            ))
     
-    # Add book_user records if read dates exist
+    # Process genres
+    if 'genres' in book_info:
+        for i, genre in enumerate(book_info['genres'], 1):
+            if genre.get('name'):
+                tables['genre'].append(create_record(
+                    DEFAULT_GENRE,
+                    {
+                        'id': i,
+                        'name': genre['name']
+                    },
+                    now
+                ))
+                
+                tables['book_genre'].append(create_record(
+                    DEFAULT_BOOK_GENRE,
+                    {
+                        'genre_id': i,
+                        'book_id': book_info['id']
+                    },
+                    now
+                ))
+    
+    # Process awards
+    if 'details' in book_info and 'awards' in book_info['details']:
+        for award in book_info['details']['awards']:
+            if award.get('id') and award.get('name'):
+                tables['award'].append(create_record(
+                    DEFAULT_AWARD,
+                    {
+                        'goodreads_id': award['id'],
+                        'name': award['name']
+                    },
+                    now
+                ))
+                
+                tables['book_award'].append(create_record(
+                    DEFAULT_BOOK_AWARD,
+                    {
+                        'book_id': book_info['id'],
+                        'award_id': award['id'],
+                        'category': award.get('category'),
+                        'year': award.get('year'),
+                        'designation': award.get('designation')
+                    },
+                    now
+                ))
+    
+    # Add default users if not present
+    if not tables['user']:
+        tables['user'].extend([
+            create_record(DEFAULT_USER, {'id': 1, 'name': 'Warren'}, now),
+            create_record(DEFAULT_USER, {'id': 2, 'name': 'Ruth'}, now)
+        ])
+    
+    # Add reading records if they exist
     if book_info.get('warren_last_read'):
         tables['book_user'].append(create_record(
             DEFAULT_BOOK_USER,
             {
                 'book_id': book_info['id'],
-                'user_id': 1,  # Warren's ID
+                'user_id': 1,
                 'status': 'read',
                 'source': 'calibre',
                 'finished_at': book_info['warren_last_read']
             },
             now
         ))
-
+    
     if book_info.get('ruth_last_read'):
         tables['book_user'].append(create_record(
             DEFAULT_BOOK_USER,
             {
                 'book_id': book_info['id'],
-                'user_id': 2,  # Ruth's ID
+                'user_id': 2,
                 'status': 'read',
                 'source': 'calibre',
                 'finished_at': book_info['ruth_last_read']
-            },
-            now
-        ))
-
-    
-    # Process main series
-    if book_info['title']['series'].get('name'):
-        tables['series'].append(create_record(
-            DEFAULT_SERIES,
-            {
-                'goodreads_id': book_info['title']['series']['id'],
-                'title': book_info['title']['series']['name']
-            },
-            now
-        ))
-        
-        tables['book_series'].append(create_record(
-            DEFAULT_BOOK_SERIES,
-            {
-                'book_id': book_info['id'],
-                'series_id': book_info['title']['series']['id'],
-                'series_order': book_info['title']['series'].get('number')
-            },
-            now
-        ))
-    
-    # Process additional series
-    for series in book_info.get('additional_series', []):
-        tables['series'].append(create_record(
-            DEFAULT_SERIES,
-            {
-                'goodreads_id': series['id'],
-                'title': series['name']
-            },
-            now
-        ))
-        
-        tables['book_series'].append(create_record(
-            DEFAULT_BOOK_SERIES,
-            {
-                'book_id': book_info['id'],
-                'series_id': series['id']
-            },
-            now
-        ))
-    
-    # Process authors
-    for author in book_info['authors']:
-        tables['author'].append(create_record(
-            DEFAULT_AUTHOR,
-            {
-                'goodreads_id': author['id'],
-                'name': author['name']
-            },
-            now
-        ))
-        
-        tables['author_book'].append(create_record(
-            DEFAULT_AUTHOR_BOOK,
-            {
-                'book_id': book_info['id'],
-                'author_id': author['id'],
-                'role': author['role']
-            },
-            now
-        ))
-    
-    # Process genres
-    for i, genre in enumerate(book_info['genres'], 1):
-        tables['genre'].append(create_record(
-            DEFAULT_GENRE,
-            {
-                'id': i,
-                'name': genre['name']
-            },
-            now
-        ))
-        
-        tables['book_genre'].append(create_record(
-            DEFAULT_BOOK_GENRE,
-            {
-                'genre_id': i,
-                'book_id': book_info['id']
-            },
-            now
-        ))
-    
-    # Process awards
-    for award in book_info['details']['awards']:
-        tables['award'].append(create_record(
-            DEFAULT_AWARD,
-            {
-                'goodreads_id': award['id'],
-                'name': award['name']
-            },
-            now
-        ))
-        
-        tables['book_award'].append(create_record(
-            DEFAULT_BOOK_AWARD,
-            {
-                'book_id': book_info['id'],
-                'award_id': award['id'],
-                'category': award['category'],
-                'year': award['year'],
-                'designation': award['designation']
             },
             now
         ))
