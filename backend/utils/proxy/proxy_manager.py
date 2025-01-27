@@ -219,3 +219,9 @@ class ProxyManager:
     
     # Choose and stick with one browser profile per session
     return random.choice(browser_profiles)
+
+   def get_proxies(self):
+       """Get list of proxies, refreshing if needed"""
+       if self._should_refresh_proxies():
+           self.load_proxies()
+       return self.proxies

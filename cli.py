@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import click
+import sqlite3
 from datetime import datetime
 from backend.scrapers.book import scrape_book
 from backend.scrapers.author import scrape_author
@@ -7,6 +8,7 @@ from backend.scrapers.author_books import scrape_author_books
 from backend.scrapers.series import scrape_series
 from backend.scrapers.similar import scrape_similar
 from backend.scrapers.editions import scrape_editions
+from backend.db.db_operations import DatabaseOperations
 from backend.calibre.library_import import process_calibre_books
 from backend.utils.data_transformer import (
     transform_book_data,
@@ -33,12 +35,25 @@ def cli():
               help='Path to Calibre metadata.db file')
 @click.option('--limit', default=None, type=int,
               help='Limit the number of books to process')
-def calibre(db_path, limit):
+@click.option('--output-db', default="books.db",
+              help='Path to output SQLite database')
+def calibre(db_path, limit, output_db):
     """Process books from Calibre library"""
     try:
         tables = process_calibre_books(db_path, limit)
         if tables['book']:
             print_transformed_data(tables)
+            
+            # Insert into database
+            db = DatabaseOperations(output_db)
+            if db.insert_transformed_data(tables):
+                print("\nSuccessfully inserted data into database")
+                stats = db.get_stats()
+                print("\nDatabase statistics:")
+                for table, count in stats.items():
+                    print(f"{table}: {count} records")
+            else:
+                click.echo("Failed to insert data into database")
         else:
             click.echo("No books found in Calibre database")
     except Exception as e:
@@ -133,6 +148,81 @@ def reading_status(book_id, user_id, status, started, finished):
         }]
     }
     print_transformed_data(tables)
+    
+@cli.command()
+@click.option('--db-path', default="books.db",
+              help='Path to SQLite database')
+@click.option('--limit', default=None, type=int,
+              help='Limit the number of books to process')
+def update_library(db_path, limit):
+    """Update library books with data from Goodreads"""
+    try:
+        # Connect to database
+        db = DatabaseOperations(db_path)
+        
+        # Query for unsynced library books
+        with sqlite3.connect(db_path) as conn:
+            query = """
+                SELECT b.goodreads_id, b.title, b.calibre_id
+                FROM books b 
+                WHERE b.source = 'library' 
+                AND (b.last_synced_at IS NULL OR b.last_synced_at = '')
+                ORDER BY b.goodreads_id
+            """
+            
+            if limit:
+                query += f" LIMIT {limit}"
+                
+            cursor = conn.execute(query)
+            books = cursor.fetchall()
+            
+        if not books:
+            click.echo("No unsynced library books found")
+            return
+            
+        click.echo(f"Found {len(books)} unsynced library books")
+        
+        # Process each book
+        success_count = 0
+        for i, (goodreads_id, title, calibre_id) in enumerate(books, 1):
+            click.echo(f"\nProcessing {i}/{len(books)}: {title} ({goodreads_id})")
+            
+            try:
+                # Scrape book data
+                book_info = scrape_book(goodreads_id)
+                if book_info:
+                    # Preserve library source and calibre_id
+                    book_info['source'] = 'library'
+                    book_info['calibre_id'] = calibre_id
+                    
+                    # Transform data
+                    tables = transform_book_data(book_info)
+                    
+                    # Ensure books table has the calibre_id
+                    if 'book' in tables and tables['book']:
+                        tables['book'][0]['calibre_id'] = calibre_id
+                    
+                    # Insert into database
+                    if db.insert_transformed_data(tables):
+                        click.echo(f"Successfully updated book: {title}")
+                        success_count += 1
+                    else:
+                        click.echo(f"Failed to update book: {title}")
+                else:
+                    click.echo(f"Failed to scrape book: {title}")
+            except Exception as e:
+                click.echo(f"Error processing book {title}: {str(e)}")
+                continue
+                
+        # Print final stats
+        click.echo(f"\nSuccessfully updated {success_count} out of {len(books)} books")
+        stats = db.get_stats()
+        click.echo("\nDatabase statistics:")
+        for table, count in stats.items():
+            click.echo(f"{table}: {count} records")
+            
+    except Exception as e:
+        click.echo(f"Error updating library: {str(e)}")
 
 if __name__ == '__main__':
     cli()

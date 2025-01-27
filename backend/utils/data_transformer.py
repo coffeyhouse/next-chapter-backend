@@ -1,5 +1,22 @@
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from dateutil import parser as date_parser
+
+def format_pub_date(date_str: Optional[str]) -> Optional[str]:
+    """Convert publication date to ISO format"""
+    if not date_str:
+        return None
+        
+    try:
+        # Parse the date string
+        dt = date_parser.parse(date_str)
+        # Add time component if only date is present
+        if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+            dt = dt.replace(hour=12, minute=0, second=0, microsecond=0)
+        # Return ISO format
+        return dt.isoformat()
+    except (ValueError, TypeError):
+        return None
 
 # Define default table schemas
 DEFAULT_BOOK = {
@@ -173,13 +190,13 @@ def transform_book_data(book_info: Dict[str, Any]) -> Dict[str, List[Dict]]:
         'title': title,
         'calibre_id': book_info.get('calibre_id'),
         'source': book_info.get('source'),
-        'last_synced_at': now  # Always update last_synced_at
+        'last_synced_at': now if book_info['details'].get('rating') else None  # Set sync date only if we have scraped details
     }
     
     # Add additional fields if they exist
     if 'publication' in book_info:
         book_record.update({
-            'published_date': book_info['publication'].get('date'),
+            'published_date': format_pub_date(book_info['publication'].get('date')),
             'published_state': book_info['publication'].get('status')
         })
     
@@ -251,7 +268,7 @@ def transform_book_data(book_info: Dict[str, Any]) -> Dict[str, List[Dict]]:
                 {
                     'goodreads_id': series['id'],
                     'title': series['name'],
-                    'last_synced_at': now
+                    'last_synced_at': None
                 },
                 now
             ))

@@ -2,6 +2,8 @@ import sqlite3
 from typing import Dict, List, Any
 from pathlib import Path
 import logging
+from datetime import datetime
+from dateutil import parser as date_parser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,10 +29,11 @@ class DatabaseOperations:
         next_id = 1 if result[0] is None else result[0] + 1
         
         # Create new genre
+        now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO genres (id, name, created_at, updated_at)
-               VALUES (?, ?, datetime('now'), datetime('now'))""",
-            (next_id, genre_name)
+               VALUES (?, ?, ?, ?)""",
+            (next_id, genre_name, now, now)
         )
         
         return next_id

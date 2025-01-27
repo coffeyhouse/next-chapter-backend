@@ -25,7 +25,7 @@ class GoodreadsDownloader:
        # Try last successful proxy first if available
        if self.last_successful_proxy and self.last_successful_headers:
            try:
-               print(f"\nRetrying last successful proxy: {self.last_successful_proxy['http']}")
+               print(f"\nUsing last successful proxy: {self.last_successful_proxy['http']}")
                response = requests.get(
                    url, 
                    headers=self.last_successful_headers,
@@ -34,50 +34,78 @@ class GoodreadsDownloader:
                )
                response.raise_for_status()
                
+               # If successful, write the content and return
                local_path.write_text(response.text, encoding='utf-8')
                print(f"Successfully downloaded: {url} to {local_path}")
-               return True
-           except requests.RequestException:
-               print("Last successful proxy failed, trying new proxies...")
-               self.last_successful_proxy = None
-               self.last_successful_headers = None
-       
-       # Try new proxies if needed
-       while True:
-           try:
-               current_proxy = self.proxy_manager.get_proxy()
-               current_headers = self.proxy_manager.get_headers()
-                
-               print(f"\nTrying proxy: {current_proxy['http']}")
-               print(f"Using User-Agent: {current_headers['User-Agent'][:60]}...")
-               
-               response = requests.get(
-                   url, 
-                   headers=current_headers,
-                   proxies=current_proxy,
-                   timeout=10
-               )
-               response.raise_for_status()
-               
-               local_path.write_text(response.text, encoding='utf-8')
-               print(f"Successfully downloaded: {url} to {local_path}")
-               
-               # Store successful proxy and headers
-               self.last_successful_proxy = current_proxy
-               self.last_successful_headers = current_headers
-               
                return True
                
            except requests.RequestException as e:
-               print(f"Download error with proxy {current_proxy['http']}: {str(e)}")
-               self.proxy_manager.mark_failed()
-               continue
+               if '502 Bad Gateway' in str(e):
+                   # If we get a 502, the proxy might be temporarily overloaded
+                   # Reset it and try new ones
+                   print(f"Last successful proxy returned 502, trying new proxies...")
+                   self.last_successful_proxy = None
+                   self.last_successful_headers = None
+               else:
+                   # For other errors, retry with the same proxy a few times
+                   for _ in range(2):  # Try 2 more times
+                       try:
+                           response = requests.get(
+                               url, 
+                               headers=self.last_successful_headers,
+                               proxies=self.last_successful_proxy,
+                               timeout=10
+                           )
+                           response.raise_for_status()
+                           local_path.write_text(response.text, encoding='utf-8')
+                           print(f"Successfully downloaded on retry: {url} to {local_path}")
+                           return True
+                       except requests.RequestException:
+                           continue
+                   
+                   print(f"Last successful proxy failed after retries, trying new proxies...")
+                   self.last_successful_proxy = None
+                   self.last_successful_headers = None
+       
+       # If we get here, either there was no last successful proxy or it failed
+       return self._try_new_proxies(url, local_path)
 
    def _get_local_path(self, parsed_url, path_parts):
         path = Path('data/exported_html')
         full_path = '/'.join(path_parts).rstrip('/')
         query = parsed_url.query if parsed_url.query else ''
         return path / (full_path + query + '.html')
+
+   def _try_new_proxies(self, url, local_path):
+       """Try new proxies until one works"""
+       for proxy in self.proxy_manager.get_proxies():
+           headers = self.proxy_manager.get_headers()
+           proxy_dict = {'http': f'http://{proxy.ip}:{proxy.port}'}
+           
+           try:
+               print(f"\nTrying proxy: {proxy_dict['http']}")
+               response = requests.get(
+                   url,
+                   headers=headers,
+                   proxies=proxy_dict,
+                   timeout=10
+               )
+               response.raise_for_status()
+               
+               # Save successful proxy and headers for future use
+               self.last_successful_proxy = proxy_dict
+               self.last_successful_headers = headers
+               
+               local_path.write_text(response.text, encoding='utf-8')
+               print(f"Successfully downloaded: {url} to {local_path}")
+               return True
+               
+           except requests.RequestException as e:
+               print(f"Proxy failed: {str(e)}")
+               continue
+               
+       print("All proxies failed")
+       return False
 
 def main():
    downloader = GoodreadsDownloader()

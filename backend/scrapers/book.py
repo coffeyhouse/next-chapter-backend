@@ -132,11 +132,13 @@ def extract_publication_info(soup):
         # Check if it's an expected publication
         if text.startswith('Expected publication'):
             pub_info['status'] = 'upcoming'
-            pub_info['date'] = text.replace('Expected publication', '').strip()
-        # Check if it's already published
+            pub_info['date'] = text.replace('Expected publication', '').strip()        
         elif text.startswith('First published'):
             pub_info['status'] = 'published'
             pub_info['date'] = text.replace('First published', '').strip()
+        elif text.startswith('Published'):
+            pub_info['status'] = 'published'
+            pub_info['date'] = text.replace('Published', '').strip()
     
     return pub_info
 
@@ -327,7 +329,7 @@ def scrape_book(book_id):
         
         # Extract all info using existing functions
         book_info = {
-            'id': extract_book_id(soup),
+            'id': book_id,
             'title': extract_title(soup),
             'authors': extract_authors(soup),
             'genres': extract_genres(soup),
