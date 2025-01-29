@@ -115,7 +115,7 @@ DEFAULT_BOOK_AWARD = {
     'updated_at': None
 }
 
-DEFAULT_BOOK_EDITIONS = {
+DEFAULT_BOOK_EDITION = {
     'book_id': None,
     'edition_id': None,
     'created_at': None,
@@ -176,7 +176,7 @@ def transform_book_data(book_info: Dict[str, Any]) -> Dict[str, List[Dict]]:
         'award': [],
         'book_award': [],
         'similar_book': [],
-        'book_editions': [],
+        'book_edition': [],
         'user': [],
         'book_user': []
     }
@@ -482,47 +482,71 @@ def transform_author_books_data(author_books_info: Dict[str, Any]) -> Dict[str, 
     
     return tables
 
-def transform_editions_data(editions_info):
+def transform_editions_data(editions_info, library_books):
     """Transform editions data into database table format"""
     now = datetime.now().isoformat()
     
     # Initialize tables
     tables = {
         'book': [],
-        'book_editions': []
+        'book_edition': []
     }
     
     if editions_info:
-        first_edition, all_editions = editions_info
+        first_edition, english_edition = editions_info
         
-        # Add the first edition as the main book if it exists
-        if first_edition and first_edition.get('id'):
-            tables['book'].append(create_record(
-                DEFAULT_BOOK,
+        if first_edition and first_edition.get('id') and english_edition:
+            # Extract title properly
+            first_title = first_edition['title']
+            if isinstance(first_title, dict):
+                first_title = first_title.get('name', '')
+            
+            english_title = english_edition.get('title')
+            if isinstance(english_title, dict):
+                english_title = english_title.get('name', '')
+            
+            # Only add original book if not in library
+            if first_edition['id'] not in library_books:
+                tables['book'].append(create_record(
+                    DEFAULT_BOOK,
+                    {
+                        'goodreads_id': first_edition['id'],
+                        'title': first_title,
+                        'source': 'editions',
+                        'last_synced_at': None
+                    },
+                    now
+                ))
+            
+            # Add English edition if not in library
+            if english_edition['id'] not in library_books:
+                tables['book'].append(create_record(
+                    DEFAULT_BOOK,
+                    {
+                        'goodreads_id': english_edition['id'],
+                        'title': english_title,
+                        'isbn': english_edition.get('isbn'),
+                        'published_date': english_edition.get('published'),
+                        'language': 'English',
+                        'source': 'editions',
+                        'last_synced_at': None
+                    },
+                    now
+                ))
+            
+            # Always add edition relationship
+            tables['book_edition'].append(create_record(
+                DEFAULT_BOOK_EDITION,
                 {
-                    'goodreads_id': first_edition['id'],
-                    'title': first_edition['title'],
-                    'source': 'editions'
+                    'book_id': first_edition['id'],
+                    'edition_id': english_edition['id']
                 },
                 now
             ))
-        
-            # Add all editions EXCEPT the first edition
-            for edition in all_editions:
-                # Skip if this is the main edition or if missing ID
-                if edition['id'] and edition['id'] != first_edition['id']:
-                    tables['book_editions'].append(create_record(
-                        DEFAULT_BOOK_EDITIONS,
-                        {
-                            'book_id': first_edition['id'],
-                            'edition_id': edition['id']
-                        },
-                        now
-                    ))
     
     return tables
 
-def transform_series_data(series_info):
+def transform_series_data(series_info, library_books):
     """Transform series data into database table format"""
     now = datetime.now().isoformat()
     
@@ -534,41 +558,44 @@ def transform_series_data(series_info):
     }
     
     if series_info:
-        # Add series record
-        tables['series'].append(create_record(
-            DEFAULT_SERIES,
-            {
-                'goodreads_id': series_info['id'],
-                'title': series_info['name'],
-                'last_synced_at': now
-            },
-            now
-        ))
-        
-        # Process books in the series
-        for book in series_info.get('books', []):
-            # Add book record
-            tables['book'].append(create_record(
-                DEFAULT_BOOK,
+        # Add series if it has an ID and name
+        if series_info.get('id') and series_info.get('name'):
+            tables['series'].append(create_record(
+                DEFAULT_SERIES,
                 {
-                    'goodreads_id': book['id'],
-                    'title': book['title'],
-                    'source': 'series',
-                    'last_synced_at': now
+                    'goodreads_id': series_info['id'],
+                    'title': series_info['name'],
+                    'last_synced_at': None
                 },
                 now
             ))
             
-            # Add book-series relationship
-            tables['book_series'].append(create_record(
-                DEFAULT_BOOK_SERIES,
-                {
-                    'book_id': book['id'],
-                    'series_id': series_info['id'],
-                    'series_order': book.get('number')
-                },
-                now
-            ))
+            # Add books and relationships
+            for book in series_info.get('books', []):
+                if book.get('id'):
+                    # Only add book if not already in library
+                    if book['id'] not in library_books:
+                        tables['book'].append(create_record(
+                            DEFAULT_BOOK,
+                            {
+                                'goodreads_id': book['id'],
+                                'title': book['title'],
+                                'source': 'series',
+                                'last_synced_at': None
+                            },
+                            now
+                        ))
+                    
+                    # Always add book_series relationship
+                    tables['book_series'].append(create_record(
+                        DEFAULT_BOOK_SERIES,
+                        {
+                            'book_id': book['id'],
+                            'series_id': series_info['id'],
+                            'series_order': book.get('number')
+                        },
+                        now
+                    ))
     
     return tables
 

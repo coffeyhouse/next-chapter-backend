@@ -10,6 +10,7 @@ from backend.scrapers.series import scrape_series
 from backend.scrapers.similar import scrape_similar
 from backend.scrapers.editions import scrape_editions
 from backend.db.db_operations import DatabaseOperations
+from backend.utils.downloader import GoodreadsDownloader
 from backend.calibre.library_import import process_calibre_books
 from backend.utils.data_transformer import (
     transform_book_data,
@@ -20,6 +21,7 @@ from backend.utils.data_transformer import (
     transform_similar_data,
     print_transformed_data
 )
+from backend.utils.book_processor import BookProcessor
 
 # Ensure backend module can be imported
 import sys
@@ -38,43 +40,80 @@ def cli():
               help='Limit the number of books to process')
 @click.option('--output-db', default="books.db",
               help='Path to output SQLite database')
-def calibre(db_path, limit, output_db):
+@click.option('--scrape/--no-scrape', default=True, 
+              help='Enable/disable scraping with proxy')
+def calibre(db_path, limit, output_db, scrape):
     """Process books from Calibre library"""
     try:
-        tables = process_calibre_books(db_path, limit)
-        if tables['book']:
-            print_transformed_data(tables)
-            
-            # Insert into database
-            db = DatabaseOperations(output_db)
-            if db.insert_transformed_data(tables):
-                print("\nSuccessfully inserted data into database")
-                stats = db.get_stats()
-                print("\nDatabase statistics:")
-                for table, count in stats.items():
-                    print(f"{table}: {count} records")
-            else:
-                click.echo("Failed to insert data into database")
-        else:
+        # Initialize processor
+        processor = BookProcessor(output_db, scrape=scrape)
+        
+        # Get books from Calibre
+        calibre_books = process_calibre_books(db_path, limit)
+        if not calibre_books:
             click.echo("No books found in Calibre database")
+            return
+            
+        click.echo(f"Found {len(calibre_books['book'])} books in Calibre")
+        
+        # Process each book
+        total = len(calibre_books['book'])
+        successful = 0
+        skipped = 0
+        
+        for i, book in enumerate(calibre_books['book'], 1):
+            if book.get('goodreads_id'):
+                click.echo(f"\nProcessing {i}/{total}: {book['title']}")
+                success, was_skipped = processor.process_single_book_id(
+                    book['goodreads_id'], 
+                    source='library',
+                    calibre_id=book['calibre_id']
+                )
+                
+                if success:
+                    if was_skipped:
+                        skipped += 1
+                    else:
+                        successful += 1
+            else:
+                click.echo(f"\nSkipping {i}/{total}: {book['title']} (no Goodreads ID)")
+                skipped += 1
+                
+        # Print final statistics
+        processor.print_stats(total, successful, skipped)
+            
     except Exception as e:
         click.echo(f"Error processing Calibre database: {str(e)}")
 
 @cli.command()
 @click.argument('book_id')
-def book(book_id):
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+@click.option('--output-db', default="books.db", help='Path to output SQLite database')
+def book(book_id, scrape, output_db):
     """Scrape a book by its ID"""
-    book_info = scrape_book(book_id)
-    if book_info:
-        tables = transform_book_data(book_info)
-        print_transformed_data(tables)
-    else:
-        click.echo(f"Failed to retrieve book with ID: {book_id}")
+    try:
+        processor = BookProcessor(output_db, scrape=scrape)
+        success, skipped = processor.process_single_book_id(book_id, source='single')
+        
+        if success:
+            click.echo("Book processing successful")
+            if skipped:
+                processor.print_stats(1, 0, 1)  # Skipped book
+            else:
+                processor.print_stats(1, 1, 0)  # Processed book
+        else:
+            click.echo("Failed to process book")
+            processor.print_stats(1, 0, 0)  # Failed book
+            
+    except Exception as e:
+        click.echo(f"Error processing book: {str(e)}")
 
 @cli.command()
 @click.argument('author_id')
-def author(author_id):
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+def author(author_id, scrape):
     """Scrape an author by their ID"""
+    downloader = GoodreadsDownloader(scrape=scrape)
     author_info = scrape_author(author_id)
     if author_info:
         tables = transform_author_data(author_info)
@@ -84,37 +123,78 @@ def author(author_id):
 
 @cli.command()
 @click.argument('author_id')
-def author_books(author_id):
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+@click.option('--output-db', default="books.db", help='Path to output SQLite database')
+def author_books(author_id, scrape, output_db):
     """Scrape all books by an author"""
-    result = scrape_author_books(author_id)
-    if result:
-        tables = transform_author_books_data(result)
-        print_transformed_data(tables)
-    else:
-        click.echo(f"Failed to retrieve books for author ID: {author_id}")
+    try:
+        # Get author books info
+        result = scrape_author_books(author_id, scrape=scrape)
+        if not result:
+            click.echo(f"Failed to retrieve books for author ID: {author_id}")
+            return
+            
+        click.echo(f"\nFound author: {result['author_name']}")
+        
+        # Initialize processor
+        processor = BookProcessor(output_db, scrape)
+        
+        # Process all books
+        total, successful = processor.process_book_list(
+            result['books'],
+            source='author',
+            description='author books'
+        )
+        
+        # Print statistics
+        processor.print_stats(total, successful)
+            
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
 
 @cli.command()
 @click.argument('series_id')
-def series(series_id):
-    """Scrape a specific series"""
-    result = scrape_series(series_id)
-    if result:
-        tables = transform_series_data(result)
-        print_transformed_data(tables)
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+@click.option('--output-db', default="books.db", help='Path to output SQLite database')
+def series(series_id, scrape, output_db):
+    """Scrape a series and all its books"""
+    try:
+        # First get series info
+        series_info = scrape_series(series_id, scrape=scrape)
+        if not series_info:
+            click.echo(f"Failed to retrieve series ID: {series_id}")
+            return
+            
+        click.echo(f"\nFound series: {series_info['name']}")
         
-        # Insert into database
-        db = DatabaseOperations('books.db')
-        if db.insert_transformed_data(tables):
-            click.echo(f"Successfully added series: {result['name']}")
-        else:
-            click.echo("Failed to add series to database")
-    else:
-        click.echo(f"Failed to retrieve series ID: {series_id}")
+        # Initialize processor
+        processor = BookProcessor(output_db, scrape)
+        
+        # # First, insert the series information
+        # series_tables = transform_series_data(series_info, set())
+        # if processor.db.insert_transformed_data(series_tables):
+        #     click.echo("Successfully inserted series data")
+        
+        # Process all books
+        total, successful, skipped = processor.process_book_list(
+            series_info['books'],
+            source='series',
+            description='series books'
+        )
+        
+        # Print statistics
+        processor.print_stats(total, successful, skipped)
+            
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
 
 @cli.command()
 @click.argument('book_id')
-def similar(book_id):
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+def similar(book_id, scrape):
     """Find similar books"""
+    downloader = GoodreadsDownloader(scrape=scrape)
     result = scrape_similar(book_id)
     if result:
         tables = transform_similar_data(result)
@@ -124,8 +204,10 @@ def similar(book_id):
 
 @cli.command()
 @click.argument('work_id')
-def editions(work_id):
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+def editions(work_id, scrape):
     """Scrape all editions of a book"""
+    downloader = GoodreadsDownloader(scrape=scrape)
     first_edition, all_editions = scrape_editions(work_id)
     if all_editions:
         tables = transform_editions_data((first_edition, all_editions))
@@ -158,101 +240,56 @@ def reading_status(book_id, user_id, status, started, finished):
     print_transformed_data(tables)
     
 @cli.command()
-@click.option('--db-path', default="books.db",
-              help='Path to SQLite database')
-@click.option('--limit', default=None, type=int,
-              help='Limit the number of books to process')
+@click.option('--db-path', default="books.db", help='Path to SQLite database')
+@click.option('--limit', default=None, type=int, help='Limit the number of items to process')
 @click.option('--source', type=click.Choice(['library', 'series', 'author', 'editions']), 
-              default='library', help='Source of books to update')
-def update_library(db_path, limit, source):
-    """Update books with data from Goodreads based on source"""
+              default='library', help='Source type to update')
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping with proxy')
+def update_library(db_path, limit, source, scrape):
+    """Update books or series with data from Goodreads based on source"""
     try:
-        # Connect to database
-        db = DatabaseOperations(db_path)
-        
-        # Query based on source
-        with sqlite3.connect(db_path) as conn:
-            if source == 'library':
+        if source == 'series':
+            # Connect to database
+            with sqlite3.connect(db_path) as conn:
+                # Query for unsynced series
                 query = """
-                    SELECT b.goodreads_id, b.title, b.calibre_id
-                    FROM books b 
-                    WHERE b.source = 'library' 
-                    AND (b.last_synced_at IS NULL OR b.last_synced_at = '')
-                    ORDER BY b.goodreads_id
+                    SELECT DISTINCT s.goodreads_id, s.title
+                    FROM series s
+                    WHERE s.last_synced_at IS NULL
+                    ORDER BY s.goodreads_id
                 """
-            elif source == 'series':
-                query = """
-                    SELECT b.goodreads_id, b.title, NULL as calibre_id
-                    FROM books b 
-                    WHERE b.source = 'series'
-                    AND (b.last_synced_at IS NULL OR b.last_synced_at = '')
-                    ORDER BY b.goodreads_id
-                """
-            elif source == 'editions':
-                query = """
-                    SELECT b.goodreads_id, b.title, NULL as calibre_id
-                    FROM books b 
-                    WHERE b.source = 'editions'
-                    AND (b.last_synced_at IS NULL OR b.last_synced_at = '')
-                    ORDER BY b.goodreads_id
-                """
-            else:  # author
-                query = """
-                    SELECT b.goodreads_id, b.title, NULL as calibre_id
-                    FROM books b 
-                    WHERE b.source = 'author'
-                    AND (b.last_synced_at IS NULL OR b.last_synced_at = '')
-                    ORDER BY b.goodreads_id
-                """
-            
-            if limit:
-                query += f" LIMIT {limit}"
                 
-            cursor = conn.execute(query)
-            books = cursor.fetchall()
-            
-        if not books:
-            click.echo(f"No unsynced {source} books found")
-            return
-            
-        click.echo(f"Found {len(books)} unsynced {source} books")
-        
-        # Process each book
-        success_count = 0
-        for i, (goodreads_id, title, calibre_id) in enumerate(books, 1):
-            click.echo(f"\nProcessing {i}/{len(books)}: {title} ({goodreads_id})")
-            
-            try:
-                # Scrape book data
-                book_info = scrape_book(goodreads_id)
-                if book_info:
-                    # Preserve source and calibre_id if present
-                    book_info['source'] = source
-                    if calibre_id:
-                        book_info['calibre_id'] = calibre_id
+                if limit:
+                    query += f" LIMIT {limit}"
                     
-                    # Transform data
-                    tables = transform_book_data(book_info)
+                cursor = conn.execute(query)
+                series_list = cursor.fetchall()
+                
+                if not series_list:
+                    click.echo("No unsynced series found")
+                    return
                     
-                    # Ensure books table has the calibre_id if present
-                    if calibre_id and 'book' in tables and tables['book']:
-                        tables['book'][0]['calibre_id'] = calibre_id
-                    
-                    # Insert into database
-                    if db.insert_transformed_data(tables):
-                        click.echo(f"Successfully updated book: {title}")
+                click.echo(f"Found {len(series_list)} unsynced series")
+                
+                # Process each series using existing series command
+                success_count = 0
+                for i, (series_id, title) in enumerate(series_list, 1):
+                    click.echo(f"\nProcessing series {i}/{len(series_list)}: {title}")
+                    try:
+                        # Use the existing series command functionality
+                        ctx = click.get_current_context()
+                        ctx.invoke(series, series_id=series_id, scrape=scrape, output_db=db_path)
                         success_count += 1
-                    else:
-                        click.echo(f"Failed to update book: {title}")
-                else:
-                    click.echo(f"Failed to scrape book: {title}")
-            except Exception as e:
-                click.echo(f"Error processing book {title}: {str(e)}")
-                continue
+                    except Exception as e:
+                        click.echo(f"Error processing series {title}: {str(e)}")
+                        continue
+                        
+                click.echo(f"\nCompleted processing {len(series_list)} series")
+                click.echo(f"Successfully updated {success_count} series")
+        else:
+            click.echo(f"Source type '{source}' is no longer supported in update-library.")
+            click.echo("Books are now processed during initial scraping.")
                 
-        click.echo(f"\nCompleted processing {len(books)} books")
-        click.echo(f"Successfully updated {success_count} books")
-        
     except Exception as e:
         click.echo(f"Error: {str(e)}")
 
@@ -523,6 +560,18 @@ def match_library_books(db_path, limit):
             
     except Exception as e:
         click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.option('--db-path', default="books.db",
+              help='Path to SQLite database')
+def init(db_path):
+    """Initialize the SQLite database with all required tables"""
+    from backend.db.db_init import init_db
+    try:
+        init_db(db_path)
+        click.echo(f"Successfully initialized database at: {db_path}")
+    except Exception as e:
+        click.echo(f"Error initializing database: {str(e)}")
 
 def clean_text(text):
     """Clean and normalize text for comparison"""

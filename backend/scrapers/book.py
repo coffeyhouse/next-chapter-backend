@@ -304,23 +304,33 @@ def extract_book_cover_url(soup):
 def get_book_url(book_id):
     return f"https://www.goodreads.com/book/show/{book_id}"
 
-def scrape_book(book_id):
-    # Initialize downloader
-    downloader = GoodreadsDownloader()
+def scrape_book(book_id, scrape=False):
+    """Scrape book information from Goodreads
+    
+    Args:
+        book_id (str): Goodreads book ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        dict: Book information or None if not found
+    """
+    print(f"Initializing scraper with scrape={scrape}")
+    downloader = GoodreadsDownloader(scrape=scrape)
     
     # Get book URL
     url = get_book_url(book_id)
     
-    # Download the HTML content
+    # Download/retrieve the HTML content
     success = downloader.download_url(url)
     if not success:
+        print(f"Failed to get content for book ID: {book_id}")
         return None
         
-    # Construct the path where the file was saved
+    # Construct the path where the file was saved/should be
     local_path = Path('data/exported_html') / 'book' / 'show' / f"{book_id}.html"
     
     try:
-        # Read the downloaded HTML
+        # Read the HTML file
         with open(local_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
             
@@ -363,4 +373,5 @@ if __name__ == "__main__":
         sys.exit(1)
         
     book_id = sys.argv[1]
-    scrape_book(book_id)  # Just scrape, no printing
+    scrape = "--scrape" in sys.argv
+    scrape_book(book_id, scrape=scrape)

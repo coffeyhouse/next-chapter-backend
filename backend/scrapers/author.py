@@ -78,17 +78,26 @@ def extract_author_photo_url(soup):
             
     return None
 
-def scrape_author(author_id):
-    # Initialize downloader
-    downloader = GoodreadsDownloader()
+def scrape_author(author_id, scrape=False):
+    """Scrape author information from Goodreads
+    
+    Args:
+        author_id (str): Goodreads author ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        dict: Author information or None if not found
+    """
+    # Initialize downloader with scrape flag
+    downloader = GoodreadsDownloader(scrape=scrape)
     
     # Get author URL
     url = get_author_url(author_id)
     
-    # Download the HTML content
+    # Download/retrieve the HTML content
     success = downloader.download_url(url)
     if not success:
-        print(f"Failed to download author ID: {author_id}")
+        print(f"Failed to get content for author ID: {author_id}")
         return None
         
     # Construct the path where the file was saved
@@ -130,13 +139,14 @@ def scrape_author(author_id):
     except Exception as e:
         print(f"Error processing author ID {author_id}: {str(e)}")
         return None
-    
+
 if __name__ == "__main__":
     import sys
     
-    if len(sys.argv) != 2:
-        print("Usage: python -m backend.scrapers.author <author_id>")
+    if len(sys.argv) < 2:
+        print("Usage: python -m backend.scrapers.author <author_id> [--scrape]")
         sys.exit(1)
         
     author_id = sys.argv[1]
-    scrape_author(author_id)
+    scrape = "--scrape" in sys.argv
+    scrape_author(author_id, scrape=scrape)

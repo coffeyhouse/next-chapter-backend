@@ -103,24 +103,33 @@ def extract_series_info(file_path, html_content):
 def get_series_url(series_id):
     return f"https://www.goodreads.com/series/show/{series_id}"
 
-def scrape_series(series_id):
-    # Initialize downloader
-    downloader = GoodreadsDownloader()
+def scrape_series(series_id, scrape=False):
+    """Scrape series information from Goodreads
+    
+    Args:
+        series_id (str): Goodreads series ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        dict: Series information or None if not found
+    """
+    # Initialize downloader with scrape flag
+    downloader = GoodreadsDownloader(scrape=scrape)
     
     # Get series URL
     url = get_series_url(series_id)
     
-    # Download the HTML content
+    # Download/retrieve the HTML content
     success = downloader.download_url(url)
     if not success:
-        print(f"Failed to download series ID: {series_id}")
+        print(f"Failed to get content for series ID: {series_id}")
         return None
         
     # Construct the path where the file was saved
     local_path = Path('data/exported_html') / 'series' / 'show' / f"{series_id}.html"
     
     try:
-        # Read the downloaded HTML
+        # Read the HTML file
         with open(local_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
             
@@ -140,13 +149,11 @@ def scrape_series(series_id):
         print(f"Error processing series ID {series_id}: {str(e)}")
         return None
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python -m backend.scrapers.series <series_id>")
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python -m backend.scrapers.series <series_id> [--scrape]")
         sys.exit(1)
         
     series_id = sys.argv[1]
-    scrape_series(series_id)
-
-if __name__ == "__main__":
-    main()
+    scrape = "--scrape" in sys.argv
+    scrape_series(series_id, scrape=scrape)

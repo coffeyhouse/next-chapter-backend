@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from dateutil import parser as date_parser
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class DatabaseOperations:
@@ -66,7 +66,7 @@ class DatabaseOperations:
                 # Process remaining tables
                 insert_order = [
                     ('books', """
-                        INSERT OR REPLACE INTO books (
+                        INSERT INTO books (
                             goodreads_id, title, published_date, published_state,
                             language, calibre_id, pages, isbn, goodreads_rating,
                             goodreads_votes, description, image_url, similar_books_id,
@@ -77,6 +77,24 @@ class DatabaseOperations:
                             :goodreads_votes, :description, :image_url, :similar_books_id,
                             :source, :hidden, :created_at, :updated_at, :last_synced_at
                         )
+                        ON CONFLICT(goodreads_id) DO UPDATE SET
+                            title = excluded.title,
+                            published_date = excluded.published_date,
+                            published_state = excluded.published_state,
+                            language = excluded.language,
+                            calibre_id = excluded.calibre_id,
+                            pages = excluded.pages,
+                            isbn = excluded.isbn,
+                            goodreads_rating = excluded.goodreads_rating,
+                            goodreads_votes = excluded.goodreads_votes,
+                            description = excluded.description,
+                            image_url = excluded.image_url,
+                            similar_books_id = excluded.similar_books_id,
+                            source = excluded.source,
+                            hidden = excluded.hidden,
+                            updated_at = excluded.updated_at,
+                            last_synced_at = excluded.last_synced_at
+                        WHERE books.goodreads_id = excluded.goodreads_id
                     """),
                     ('library', """
                         INSERT OR REPLACE INTO library (

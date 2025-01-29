@@ -45,24 +45,33 @@ def extract_similar_books(soup):
             
     return main_book, similar_books
 
-def scrape_similar(book_id):
-    # Initialize downloader
-    downloader = GoodreadsDownloader()
+def scrape_similar(book_id, scrape=False):
+    """Scrape similar books from Goodreads
+    
+    Args:
+        book_id (str): Goodreads book ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        tuple: (main_book, similar_books) or None if not found
+    """
+    # Initialize downloader with scrape flag
+    downloader = GoodreadsDownloader(scrape=scrape)
     
     # Get URL
     url = get_similar_url(book_id)
     
-    # Download the HTML content
+    # Download/retrieve the HTML content
     success = downloader.download_url(url)
     if not success:
-        print(f"Failed to download similar books for book ID: {book_id}")
+        print(f"Failed to get content for similar books for book ID: {book_id}")
         return None
         
     # Construct the path where the file was saved
     local_path = Path('data/exported_html') / 'book' / 'similar' / f"{book_id}.html"
     
     try:
-        # Read the downloaded HTML
+        # Read the HTML file
         with open(local_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
             
@@ -78,12 +87,14 @@ def scrape_similar(book_id):
         return None
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python -m backend.scrapers.similar <book_id>")
+    if len(sys.argv) < 2:
+        print("Usage: python -m backend.scrapers.similar <book_id> [--scrape]")
         sys.exit(1)
         
     book_id = sys.argv[1]
-    scrape_similar(book_id)
+    scrape = "--scrape" in sys.argv
+    
+    scrape_similar(book_id, scrape=scrape)    
 
 if __name__ == "__main__":
-    main() 
+    main()

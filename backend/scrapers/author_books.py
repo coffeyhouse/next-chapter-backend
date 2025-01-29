@@ -83,8 +83,17 @@ def extract_pagination_info(soup):
     
     return pagination
 
-def scrape_author_books(author_id):
-    downloader = GoodreadsDownloader()
+def scrape_author_books(author_id, scrape=False):
+    """Scrape all books by an author from Goodreads
+    
+    Args:
+        author_id (str): Goodreads author ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        dict: Author books information or None if not found
+    """
+    downloader = GoodreadsDownloader(scrape=scrape)
     all_books = []
     author_name = None
     current_page = 1
@@ -93,18 +102,21 @@ def scrape_author_books(author_id):
         # Get URL for current page
         url = get_author_books_url(author_id, current_page)
         
-        # Download the HTML content
+        # Download/retrieve the HTML content
         success = downloader.download_url(url)
         if not success:
-            print(f"Failed to download page {current_page} for author ID: {author_id}")
-            break
+            print(f"Failed to get content for page {current_page} of author ID: {author_id}")
+            # If we have books from previous pages, return them
+            if all_books:
+                break
+            return None
         
         # Construct the path where the file was saved
         query_params = f"page={current_page}&per_page=100&utf8=%E2%9C%93&sort=original_publication_year"
         local_path = Path('data/exported_html/author/list') / f"{author_id}{query_params}.html"
         
         try:
-            # Read the downloaded HTML
+            # Read the HTML file
             with open(local_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             
@@ -131,7 +143,10 @@ def scrape_author_books(author_id):
             
         except Exception as e:
             print(f"Error processing page {current_page} for author ID {author_id}: {str(e)}")
-            break
+            # If we have books from previous pages, return them
+            if all_books:
+                break
+            return None
         
     # Filter to only include books with publication data
     published_books = [book for book in all_books if book['publication'] is not None]
@@ -142,15 +157,13 @@ def scrape_author_books(author_id):
         'books': published_books
     }
 
-def main():
+if __name__ == "__main__":
     import sys
     
-    if len(sys.argv) != 2:
-        print("Usage: python -m backend.scrapers.author_books <author_id>")
+    if len(sys.argv) < 2:
+        print("Usage: python -m backend.scrapers.author_books <author_id> [--scrape]")
         sys.exit(1)
         
     author_id = sys.argv[1]
-    scrape_author_books(author_id)
-
-if __name__ == "__main__":
-    main()
+    scrape = "--scrape" in sys.argv
+    scrape_author_books(author_id, scrape=scrape)

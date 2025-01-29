@@ -3,9 +3,13 @@ from bs4 import BeautifulSoup
 import sys
 import json
 import re
+from collections import defaultdict
+from backend.scrapers.book import scrape_book
 from backend.utils.downloader import GoodreadsDownloader
 from urllib.parse import urlencode
 from backend.utils.data_transformer import transform_editions_data, print_transformed_data
+
+example_html_dir = Path('exported_html/work/editions')
 
 def get_editions_url(work_id, page=1):
     base_url = f"https://www.goodreads.com/work/editions/{work_id}"
@@ -44,7 +48,8 @@ def extract_books(soup):
             'title': None,
             'format': None,
             'published': None,
-            'isbn': None
+            'isbn': None,
+            'language': None
         }
         
         # Get book ID and title
@@ -55,10 +60,15 @@ def extract_books(soup):
             if url_match:
                 book_info['id'] = url_match.group(1)
         
-        # Get format and publication info
+        # Get format, publication info, and language
         details = edition.find('div', class_='editionData')
         if details:
             text = details.get_text(' ', strip=True)
+            
+            # Extract language
+            language_div = details.find('div', text=lambda x: x and 'Edition language:' in x)
+            if language_div and language_div.find_next('div', class_='dataValue'):
+                book_info['language'] = language_div.find_next('div', class_='dataValue').text.strip()
             
             # Extract format
             format_match = re.search(r'(Paperback|Hardcover|Kindle Edition|ebook|Audio CD|Mass Market Paperback|Unknown Binding)', text, re.IGNORECASE)
@@ -112,20 +122,29 @@ def extract_pagination_info(soup):
     
     return pagination
 
-def scrape_editions(work_id):
-    downloader = GoodreadsDownloader()
-    all_editions = []
+def scrape_editions(work_id, scrape=False):
+    """Scrape editions until an English one is found
+    
+    Args:
+        work_id (str): Goodreads work ID
+        scrape (bool): If True, use proxy to scrape. If False, only use cached files.
+        
+    Returns:
+        tuple: (first_edition, english_edition) or (first_edition, None) if no English edition found
+    """
+    downloader = GoodreadsDownloader(scrape=scrape)
     current_page = 1
     first_edition = None
+    english_edition = None
     
     while True:
         # Get URL for current page
         url = get_editions_url(work_id, current_page)
         
-        # Download the HTML content
+        # Download/retrieve the HTML content
         success = downloader.download_url(url)
         if not success:
-            print(f"Failed to download page {current_page} for work ID: {work_id}")
+            print(f"Failed to get content for page {current_page} of work ID: {work_id}")
             break
         
         # Construct the path where the file was saved
@@ -133,7 +152,7 @@ def scrape_editions(work_id):
         local_path = Path('data/exported_html/work/editions') / f"{work_id}{query_params}.html"
         
         try:
-            # Read the downloaded HTML
+            # Read the HTML file
             with open(local_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             
@@ -146,7 +165,16 @@ def scrape_editions(work_id):
             
             # Extract editions from this page
             editions = extract_books(soup)
-            all_editions.extend(editions)
+            
+            # Check each edition for English language
+            for edition in editions:
+                if edition['id'] and edition.get('language', '').lower() == 'english':
+                    book_info = scrape_book(edition['id'], scrape=scrape)
+                    if book_info:
+                        book_info['language'] = 'English'  # Ensure language is set
+                        english_edition = book_info
+                        print(f"Found English edition: {edition['id']}")
+                        return first_edition, english_edition
             
             # Get pagination info
             pagination = extract_pagination_info(soup)
@@ -161,16 +189,15 @@ def scrape_editions(work_id):
         except Exception as e:
             print(f"Error processing page {current_page} for work ID {work_id}: {str(e)}")
             break
-    
-    return first_edition, all_editions
+            
+    # Return None if no English edition found
+    return first_edition, None
 
-def main():   
-    if len(sys.argv) != 2:
-        print("Usage: python -m backend.scrapers.editions <work_id>")
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python -m backend.scrapers.editions <work_id> [--scrape]")
         sys.exit(1)
         
     work_id = sys.argv[1]
-    scrape_editions(work_id)
-
-if __name__ == "__main__":
-    main()
+    scrape = "--scrape" in sys.argv
+    scrape_editions(work_id, scrape=scrape)
