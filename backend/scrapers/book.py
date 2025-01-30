@@ -148,6 +148,9 @@ def extract_language(data):
 def extract_pages(data):
     return data.get('numberOfPages')
 
+def extract_format(data):
+    return data.get('bookFormat')
+
 def extract_isbn(data):
     return data.get('isbn')
 
@@ -211,6 +214,7 @@ def extract_book_details(soup):
             
             details['language'] = extract_language(data)
             details['pages'] = extract_pages(data)
+            details['format'] = extract_format(data)
             details['isbn'] = extract_isbn(data)
             details['awards'] = extract_awards(soup)
             

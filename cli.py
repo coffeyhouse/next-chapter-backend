@@ -170,17 +170,22 @@ def series(series_id, scrape, output_db):
         # Initialize processor
         processor = BookProcessor(output_db, scrape)
         
-        # # First, insert the series information
-        # series_tables = transform_series_data(series_info, set())
-        # if processor.db.insert_transformed_data(series_tables):
-        #     click.echo("Successfully inserted series data")
-        
         # Process all books
         total, successful, skipped = processor.process_book_list(
             series_info['books'],
             source='series',
             description='series books'
         )
+        
+        # Update series last_synced_at
+        now = datetime.now().isoformat()
+        with sqlite3.connect(output_db) as conn:
+            conn.execute("""
+                UPDATE series 
+                SET last_synced_at = ?, updated_at = ?
+                WHERE goodreads_id = ?
+            """, (now, now, series_id))
+            conn.commit()
         
         # Print statistics
         processor.print_stats(total, successful, skipped)
@@ -249,7 +254,7 @@ def update_library(db_path, limit, source, scrape):
     """Update books or series with data from Goodreads based on source"""
     try:
         if source == 'series':
-            # Connect to database
+            # Series processing code remains unchanged
             with sqlite3.connect(db_path) as conn:
                 # Query for unsynced series
                 query = """
@@ -271,12 +276,10 @@ def update_library(db_path, limit, source, scrape):
                     
                 click.echo(f"Found {len(series_list)} unsynced series")
                 
-                # Process each series using existing series command
                 success_count = 0
                 for i, (series_id, title) in enumerate(series_list, 1):
                     click.echo(f"\nProcessing series {i}/{len(series_list)}: {title}")
                     try:
-                        # Use the existing series command functionality
                         ctx = click.get_current_context()
                         ctx.invoke(series, series_id=series_id, scrape=scrape, output_db=db_path)
                         success_count += 1
@@ -286,6 +289,92 @@ def update_library(db_path, limit, source, scrape):
                         
                 click.echo(f"\nCompleted processing {len(series_list)} series")
                 click.echo(f"Successfully updated {success_count} series")
+                
+        elif source == 'author':
+            # Connect to database
+            with sqlite3.connect(db_path) as conn:
+                # Query for unsynced authors
+                query = """
+                    SELECT DISTINCT a.goodreads_id, a.name
+                    FROM authors a
+                    WHERE a.last_synced_at IS NULL
+                    ORDER BY a.goodreads_id
+                """
+                
+                if limit:
+                    query += f" LIMIT {limit}"
+                    
+                cursor = conn.execute(query)
+                author_list = cursor.fetchall()
+                
+                if not author_list:
+                    click.echo("No unsynced authors found")
+                    return
+                    
+                click.echo(f"Found {len(author_list)} unsynced authors")
+                
+                # Process each author
+                success_count = 0
+                db = DatabaseOperations(db_path)
+                now = datetime.now().isoformat()
+                
+                for i, (author_id, name) in enumerate(author_list, 1):
+                    click.echo(f"\nProcessing author {i}/{len(author_list)}: {name}")
+                    try:
+                        # First get author details
+                        author_info = scrape_author(author_id, scrape=scrape)
+                        if author_info:
+                            # Transform and insert author data without sync date
+                            author_tables = transform_author_data(author_info)
+                            click.echo(f"Debug - Author info: {author_info}")
+                            
+                            # Update author record with bio and image_url
+                            try:
+                                conn.execute("""
+                                    UPDATE authors 
+                                    SET bio = ?,
+                                        image_url = ?,
+                                        updated_at = ?
+                                    WHERE goodreads_id = ?
+                                """, (author_info.get('bio'), author_info.get('image_url'), now, author_id))
+                                conn.commit()
+                            except sqlite3.Error as e:
+                                click.echo(f"Error updating author details: {str(e)}")
+
+                            if db.insert_transformed_data(author_tables):
+                                click.echo(f"Successfully updated author details for: {name}")
+                                
+                                # Then get author's books
+                                try:
+                                    ctx = click.get_current_context()
+                                    ctx.invoke(author_books, author_id=author_id, scrape=scrape, output_db=db_path)
+                                    
+                                    # Only if all books were processed successfully, update the sync timestamp
+                                    try:
+                                        conn.execute("""
+                                            UPDATE authors 
+                                            SET last_synced_at = ?, updated_at = ?
+                                            WHERE goodreads_id = ?
+                                        """, (now, now, author_id))
+                                        conn.commit()
+                                        click.echo(f"Successfully synced author: {name}")
+                                        success_count += 1
+                                    except sqlite3.Error as e:
+                                        click.echo(f"Error updating sync timestamp for {name}: {str(e)}")
+                                except Exception as e:
+                                    click.echo(f"Error processing books for author {name}: {str(e)}")
+                                    continue
+                            else:
+                                click.echo(f"Failed to update author details for: {name}")
+                        else:
+                            click.echo(f"Failed to scrape author details for: {name}")
+                    except Exception as e:
+                        click.echo(f"Error processing author {name}: {str(e)}")
+                        continue
+                        
+                click.echo(f"\nCompleted processing {len(author_list)} authors")
+                click.echo(f"Successfully updated {success_count} authors")
+                
         else:
             click.echo(f"Source type '{source}' is no longer supported in update-library.")
             click.echo("Books are now processed during initial scraping.")
