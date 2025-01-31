@@ -113,7 +113,7 @@ def scrape_author(author_id, scrape=False):
         
         # Extract all info
         author_info = {
-            'id': extract_author_id(soup),
+            'goodreads_id': extract_author_id(soup),
             'name': extract_author_name(soup),
             'bio': extract_author_bio(soup),
             'image_url': extract_author_photo(soup),
