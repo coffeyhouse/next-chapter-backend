@@ -56,11 +56,24 @@ class GoodreadsDB(BaseDBOperations):
     def update_author(self, author_data: Dict[str, Any]) -> bool:
         """Update author information"""
         now = datetime.now().isoformat()
-        author_data.update({
+        
+        # Only include fields that exist in the table
+        valid_fields = {
+            'goodreads_id', 'name', 'bio', 'image_url',
+            'created_at', 'updated_at', 'last_synced_at'
+        }
+        
+        clean_data = {
+            k: v for k, v in author_data.items() 
+            if k in valid_fields
+        }
+        
+        clean_data.update({
             'updated_at': now,
             'last_synced_at': now
         })
-        return self.upsert('authors', author_data, 'goodreads_id')
+        
+        return self.upsert('authors', clean_data, 'goodreads_id')
 
     def get_unsynced_authors(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get authors that haven't been synced"""

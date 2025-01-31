@@ -1,6 +1,6 @@
-# db/operations/base.py
+# backend/db/operations/base.py
 import sqlite3
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -17,21 +17,7 @@ class BaseDBOperations:
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
-
-    def execute_query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
-        """Execute a custom query and return results as dictionaries"""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(sql, params)
-                rows = cursor.fetchall()
-                return [
-                    dict(zip([col[0] for col in cursor.description], row))
-                    for row in rows
-                ]
-        except Exception as e:
-            logger.error(f"Error executing query: {str(e)}")
-            return []
-
+        
     def upsert(self, table: str, data: Dict[str, Any], key_field: str) -> bool:
         """Insert or update a record"""
         try:
@@ -60,7 +46,7 @@ class BaseDBOperations:
         except Exception as e:
             logger.error(f"Error upserting to {table}: {str(e)}")
             return False
-
+            
     def batch_upsert(self, table: str, records: List[Dict[str, Any]], key_field: str) -> bool:
         """Batch upsert multiple records"""
         if not records:
@@ -70,7 +56,6 @@ class BaseDBOperations:
             fields = set()
             clean_records = []
             
-            # Collect all fields and clean records
             for record in records:
                 clean_record = {k: v for k, v in record.items() if v is not None}
                 fields.update(clean_record.keys())
@@ -101,3 +86,76 @@ class BaseDBOperations:
         except Exception as e:
             logger.error(f"Error batch upserting to {table}: {str(e)}")
             return False
+
+    def get_by_id(self, table: str, item_id: str, id_field: str = 'id') -> Optional[Dict[str, Any]]:
+        """Get a single record by ID"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    f"SELECT * FROM {table} WHERE {id_field} = ?",
+                    (item_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return dict(zip([col[0] for col in cursor.description], row))
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting {table} by ID: {str(e)}")
+            return None
+
+    def get_all(
+        self, 
+        table: str, 
+        conditions: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get multiple records with optional conditions"""
+        try:
+            sql = f"SELECT * FROM {table}"
+            params = []
+            
+            if conditions:
+                where_clauses = []
+                for field, value in conditions.items():
+                    if value is None:
+                        where_clauses.append(f"{field} IS NULL")
+                    else:
+                        where_clauses.append(f"{field} = ?")
+                        params.append(value)
+                if where_clauses:
+                    sql += " WHERE " + " AND ".join(where_clauses)
+                
+            if order_by:
+                sql += f" ORDER BY {order_by}"
+                
+            if limit:
+                sql += f" LIMIT {limit}"
+                
+            with self._get_connection() as conn:
+                cursor = conn.execute(sql, params)
+                rows = cursor.fetchall()
+                return [
+                    dict(zip([col[0] for col in cursor.description], row))
+                    for row in rows
+                ]
+                
+        except Exception as e:
+            logger.error(f"Error getting records from {table}: {str(e)}")
+            return []
+    
+    def execute_query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """Execute a custom query and return results as dictionaries"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(sql, params)
+                rows = cursor.fetchall()
+                return [
+                    dict(zip([col[0] for col in cursor.description], row))
+                    for row in rows
+                ]
+                
+        except Exception as e:
+            logger.error(f"Error executing query: {str(e)}")
+            return []
