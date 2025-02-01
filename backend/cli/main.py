@@ -1,12 +1,34 @@
 # backend/cli/main.py
 import click
 from typing import Optional
-from .commands import AuthorCommand
+from .commands import AuthorCommand, BookCommand
 
 @click.group()
 def cli():
     """Goodreads Scraper CLI"""
     pass
+
+@cli.command()
+@click.option('--db-path', default="books.db", help='Path to SQLite database')
+@click.option('--limit', default=None, type=int, help='Limit number of books')
+@click.option('--unsynced', is_flag=True, help='Only process unsynced books')
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping')
+def update_books(db_path: str, limit: Optional[int], unsynced: bool, scrape: bool):
+    """Update book information from Goodreads"""
+    command = BookCommand(db_path, scrape)
+    command.update_books(unsynced_only=unsynced, limit=limit)
+
+@cli.command()
+@click.argument('book_id')
+@click.option('--db-path', default="books.db", help='Path to SQLite database')
+@click.option('--scrape/--no-scrape', default=False, help='Enable/disable scraping')
+def update_book(book_id: str, db_path: str, scrape: bool):
+    """Update a specific book by ID"""
+    command = BookCommand(db_path, scrape)
+    if command.update_book(book_id):
+        click.echo("Successfully updated book")
+    else:
+        click.echo("Failed to update book")
 
 @cli.command()
 @click.option('--db-path', default="books.db", help='Path to SQLite database')

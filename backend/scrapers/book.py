@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import json
 import time
+from datetime import datetime
 from backend.utils.downloader import GoodreadsDownloader
 from backend.utils.image_downloader import download_book_cover
 
@@ -320,6 +321,7 @@ def scrape_book(book_id, scrape=False):
     """
     print(f"Initializing scraper with scrape={scrape}")
     downloader = GoodreadsDownloader(scrape=scrape)
+    now = datetime.now().isoformat()
     
     # Get book URL
     url = get_book_url(book_id)
@@ -341,27 +343,69 @@ def scrape_book(book_id, scrape=False):
         # Parse and extract information
         soup = BeautifulSoup(html_content, 'html.parser')
         
+        # Get title info first since we need to handle series separately
+        title_info = extract_title(soup)
+        
         # Extract all info using existing functions
         book_info = {
-            'id': book_id,
-            'title': extract_title(soup),
+            'goodreads_id': book_id,
+            'title': title_info['title'],
             'authors': extract_authors(soup),
             'genres': extract_genres(soup),
             'publication': extract_publication_info(soup),
             'details': extract_book_details(soup),
             'description': extract_description(soup),
-            'similar_books_id': extract_work_id(soup)
+            'similar_books_id': extract_work_id(soup),
+            'created_at': now,
+            'updated_at': now
         }
         
-        # Add series information
-        main_series_id = book_info['title']['series'].get('id') if book_info['title']['series'] else None
-        book_info['additional_series'] = extract_additional_series(soup, main_series_id)        
+        # Handle publication info
+        pub_info = extract_publication_info(soup)
+        book_info.update({
+            'published_date': pub_info.get('date'),
+            'published_state': pub_info.get('status')
+        })
         
+        # Handle book details
+        details = extract_book_details(soup)
+        book_info.update({
+            'language': details.get('language'),
+            'pages': details.get('pages'),
+            'isbn': details.get('isbn'),
+            'goodreads_rating': details.get('rating'),
+            'goodreads_votes': details.get('rating_count')
+        })
+        
+        # Handle image URL
         cover_url = extract_book_cover_url(soup)
         if cover_url:
             local_path = download_book_cover(book_id, cover_url)
             if local_path:
                 book_info['image_url'] = local_path
+        
+        # Add relationship data in separate sections
+        # These will be handled by the database operations layer
+        book_info['authors'] = extract_authors(soup)
+        book_info['genres'] = extract_genres(soup)
+        
+        # Handle series relationships
+        series = title_info.get('series', {})
+        if series and series.get('id'):
+            book_info['series'] = [{
+                'id': series['id'],
+                'name': series['name'],
+                'order': series['number']
+            }]
+            
+            # Add additional series
+            additional = extract_additional_series(soup, series['id'])
+            if additional:
+                book_info['series'].extend([{
+                    'id': s['id'],
+                    'name': s['name'],
+                    'order': None
+                } for s in additional])
         
         return book_info
         
