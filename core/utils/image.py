@@ -7,11 +7,10 @@ from urllib.parse import urlparse
 import logging
 from typing import Optional, Tuple
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ImageDownloader:
-    def __init__(self, base_dir: str = 'data'):
+    def __init__(self, base_dir: str = 'data/images'):
         """Initialize the image downloader with a base directory"""
         self.base_dir = Path(base_dir)
         
@@ -86,7 +85,7 @@ class ImageDownloader:
         
         Args:
             url: The URL of the image to download
-            image_type: Type of image (e.g., 'book_covers', 'author_photos')
+            image_type: Type of image (e.g., 'book', 'author')
             identifier: Unique identifier for the image (e.g., book_id or author_id)
             force_update: If True, download even if file exists
             
@@ -94,49 +93,33 @@ class ImageDownloader:
             Tuple of (success: bool, local_path: Optional[str])
         """
         if not url:
-            logger.warning(f"No URL provided for {image_type} {identifier}")
             return False, None
             
         try:
-            # Clean URL
             url = self._clean_image_url(url)
-            
-            # Create directory
             save_dir = self._create_directory(image_type)
             
-            # Download image
-            logger.info(f"Downloading {image_type} image for {identifier} from {url}")
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             
-            # Validate content type and get extension
             content_type = response.headers.get('content-type', 'image/jpeg')
             if not self._validate_image(response.content, content_type):
-                logger.error(f"Invalid image content for {url}")
                 return False, None
                 
             extension = self._get_extension(url, content_type)
-            
-            # Create file path
             file_path = save_dir / f"{identifier}{extension}"
             
-            # Check if file exists and force_update is False
             if file_path.exists() and not force_update:
-                logger.info(f"Image already exists at {file_path}")
                 return True, str(file_path)
             
-            # Save image
             with open(file_path, 'wb') as f:
                 f.write(response.content)
                 
-            logger.info(f"Successfully saved image to {file_path}")
             return True, str(file_path)
             
-        except requests.RequestException as e:
-            logger.error(f"Failed to download image from {url}: {str(e)}")
+        except requests.RequestException:
             return False, None
-        except Exception as e:
-            logger.error(f"Error processing image from {url}: {str(e)}")
+        except Exception:
             return False, None
 
 def download_book_cover(book_id: str, cover_url: str) -> Optional[str]:
@@ -144,7 +127,7 @@ def download_book_cover(book_id: str, cover_url: str) -> Optional[str]:
     downloader = ImageDownloader()
     success, path = downloader.download_image(
         url=cover_url,
-        image_type='book_covers',
+        image_type='book',
         identifier=book_id
     )
     return path if success else None
@@ -154,7 +137,7 @@ def download_author_photo(author_id: str, photo_url: str) -> Optional[str]:
     downloader = ImageDownloader()
     success, path = downloader.download_image(
         url=photo_url,
-        image_type='author_photos',
+        image_type='author',
         identifier=author_id
     )
     return path if success else None
@@ -185,7 +168,7 @@ def download_book_cover(book_id: str, cover_url: str) -> Optional[str]:
     downloader = ImageDownloader()
     success, path = downloader.download_image(
         url=cover_url,
-        image_type='book_covers',
+        image_type='book',
         identifier=book_id
     )
     return path if success else None
@@ -204,7 +187,7 @@ def download_author_photo(author_id: str, photo_url: str) -> Optional[str]:
     downloader = ImageDownloader()
     success, path = downloader.download_image(
         url=photo_url,
-        image_type='author_photos',
+        image_type='author',
         identifier=author_id
     )
     return path if success else None

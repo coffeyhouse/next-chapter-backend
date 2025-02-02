@@ -20,14 +20,19 @@ class BookScraper:
         {
             'goodreads_id': str,
             'title': str,
-            'description': str,
+            'work_id': str,
+            'published_date': str,
+            'published_state': str,
             'language': str,
             'pages': int,
-            'published_date': str,
             'isbn': str,
+            'goodreads_rating': float,
+            'goodreads_votes': int,
+            'description': str,
             'image_url': str,
-            'rating': float,
-            'rating_count': int,
+            'source': str,
+            'hidden': bool,
+            # Relationships (not in books table)
             'authors': [
                 {
                     'goodreads_id': str,
@@ -65,17 +70,21 @@ class BookScraper:
         try:
             soup = BeautifulSoup(html, 'html.parser')
             book_data = {
-                'goodreads_id': book_id,
-                'title': self._extract_title(soup),
-                'description': self._extract_description(soup),
-                'language': None,
-                'pages': None,
-                'isbn': None,
-                'rating': None,
-                'rating_count': None,
-                'published_date': None,
-                'image_url': None
-            }
+            'goodreads_id': book_id,
+            'title': self._extract_title(soup),
+            'work_id': self._extract_work_id(soup),
+            'description': self._extract_description(soup),
+            'language': None,
+            'pages': None,
+            'isbn': None,
+            'goodreads_rating': None,
+            'goodreads_votes': None,
+            'published_date': None,
+            'published_state': None,
+            'image_url': None,
+            'source': 'scrape',
+            'hidden': False
+        }
             
             # Extract book details
             details = self._extract_book_details(soup)
@@ -83,13 +92,14 @@ class BookScraper:
                 'language': details.get('language'),
                 'pages': details.get('pages'),
                 'isbn': details.get('isbn'),
-                'rating': details.get('rating'),
-                'rating_count': details.get('rating_count')
+                'goodreads_rating': details.get('rating'),
+                'goodreads_votes': details.get('rating_count')
             })
             
             # Get publication date
             pub_info = self._extract_publication_info(soup)
             book_data['published_date'] = pub_info.get('date')
+            book_data['published_state'] = pub_info.get('state')
             
             # Get relationships
             book_data['authors'] = self._extract_authors(soup)
@@ -150,6 +160,7 @@ class BookScraper:
             try:
                 data = json.loads(schema.string)
                 return {
+                    'format': data.get('bookFormat'),
                     'language': data.get('inLanguage'),
                     'pages': data.get('numberOfPages'),
                     'isbn': data.get('isbn'),
@@ -161,17 +172,28 @@ class BookScraper:
         return {}
     
     def _extract_publication_info(self, soup) -> dict:
-        """Extract publication date"""
+        """Extract publication date and state"""
         pub_element = soup.find('p', attrs={'data-testid': 'publicationInfo'})
         if pub_element:
             text = pub_element.text.strip()
-            for prefix in ['Published ', 'First published ', 'Expected publication ']:
-                if text.startswith(prefix):
-                    return {'date': text.replace(prefix, '').strip()}
+            result = {'date': None, 'state': None}
+            
+            if text.startswith('Expected publication'):
+                result['state'] = 'upcoming'
+                result['date'] = text.replace('Expected publication', '').strip()
+            elif text.startswith('First published'):
+                result['state'] = 'published'
+                result['date'] = text.replace('First published', '').strip()
+            elif text.startswith('Published'):
+                result['state'] = 'published'
+                result['date'] = text.replace('Published', '').strip()
+                
+            return result
         return {}
     
     def _extract_authors(self, soup) -> list:
-        """Extract author information"""
+        """Extract unique author information"""
+        seen_ids = set()  # Track seen author IDs
         authors = []
         author_links = soup.find_all('a', class_='ContributorLink')
         
@@ -180,17 +202,22 @@ class BookScraper:
             if not name_span:
                 continue
                 
-            author = {
-                'name': name_span.text.strip(),
-                'goodreads_id': None,
-                'role': 'Author'
-            }
-            
-            # Get author ID from URL
+            # Get author ID first
+            goodreads_id = None
             if 'href' in link.attrs:
                 id_match = re.search(r'/author/show/(\d+)', link['href'])
                 if id_match:
-                    author['goodreads_id'] = id_match.group(1)
+                    goodreads_id = id_match.group(1)
+            
+            # Skip if we've seen this ID before
+            if goodreads_id and goodreads_id in seen_ids:
+                continue
+                
+            author = {
+                'name': name_span.text.strip(),
+                'goodreads_id': goodreads_id,
+                'role': 'Author'
+            }
             
             # Get role if specified
             role_span = link.find('span', class_='ContributorLink__role')
@@ -198,22 +225,27 @@ class BookScraper:
                 author['role'] = role_span.text.strip('()').strip()
             
             authors.append(author)
-            
+            if goodreads_id:
+                seen_ids.add(goodreads_id)
+                
         return authors
     
     def _extract_series(self, soup) -> list:
-        """Extract series information"""
+        """Extract all series information (main and additional)"""
         series = []
-        series_element = soup.find('h3', class_='Text__title3', 
-                                 attrs={'aria-label': lambda x: x and 'Book' in x and 'series' in x})
         
+        # First get the main series
+        series_element = soup.find('h3', class_='Text__title3', 
+                                attrs={'aria-label': lambda x: x and 'Book' in x and 'series' in x})
+        
+        main_series_id = None
         if series_element:
             series_link = series_element.find('a')
             if series_link:
                 # Get series ID
                 id_match = re.search(r'/series/(\d+)', series_link['href'])
                 if id_match:
-                    series_id = id_match.group(1)
+                    main_series_id = id_match.group(1)
                     text = series_link.text.strip()
                     
                     # Handle series order if present
@@ -227,10 +259,38 @@ class BookScraper:
                             pass
                     
                     series.append({
-                        'goodreads_id': series_id,
+                        'goodreads_id': main_series_id,
                         'name': name.strip(),
                         'order': order
                     })
+        
+        # Then get additional series
+        next_data = soup.find('script', id='__NEXT_DATA__')
+        if next_data:
+            try:
+                data = json.loads(next_data.string)
+                book_data = data.get('props', {}).get('pageProps', {}).get('apolloState', {})
+                
+                # Get all series
+                for key, value in book_data.items():
+                    if isinstance(value, dict) and value.get('__typename') == 'Series':
+                        url = value.get('webUrl', '')
+                        series_match = re.search(r'/series/(\d+)', url)
+                        series_id = series_match.group(1) if series_match else None
+                        
+                        # Skip if this is the main series
+                        if main_series_id and str(main_series_id) == str(series_id):
+                            continue
+                        
+                        # Add to series list with consistent format
+                        series.append({
+                            'goodreads_id': series_id,
+                            'name': value.get('title', ''),
+                            'order': None  # Additional series typically don't have order
+                        })
+                        
+            except json.JSONDecodeError:
+                pass
         
         return series
     
@@ -270,5 +330,19 @@ class BookScraper:
                 data = json.loads(schema.string)
                 return data.get('image')
             except json.JSONDecodeError:
+                pass
+        return None
+    
+    def _extract_work_id(self, soup) -> str:
+        """Extract work ID for editions/similar books"""
+        next_data = soup.find('script', id='__NEXT_DATA__')
+        if next_data:        
+            try:
+                data = json.loads(next_data.string)
+                for key, value in data['props']['pageProps']['apolloState'].items():
+                    if isinstance(value, dict) and 'editions' in value:
+                        if value['editions'].get('webUrl'):
+                            return value['editions']['webUrl'].split('/')[-1].split('-')[0]
+            except (json.JSONDecodeError, KeyError, AttributeError):
                 pass
         return None
