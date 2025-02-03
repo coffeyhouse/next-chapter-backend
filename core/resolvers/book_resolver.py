@@ -18,7 +18,7 @@ class BookResolver:
              get complete details, which replace the original book data.
         
         Returns:
-            A dictionary with the final, fully scraped book details.
+            A dictionary with the final, fully scraped book details, or None if no editions found.
         """
         # Step 1: Scrape the main book page.
         main_book_data = self.book_scraper.scrape_book(goodreads_id)
@@ -29,25 +29,25 @@ class BookResolver:
         # Step 2: Use the work id from the main book data to scrape the editions page.
         work_id = main_book_data.get('work_id')
         if not work_id:
-            print("No work id found; returning the main book data.")
-            return main_book_data
+            print("No work id found")
+            return None
 
         editions = self.editions_scraper.scrape_editions(work_id)
         if not editions:
-            print("No editions found; using main book data.")
-            return main_book_data
+            print("No editions found")
+            return None
 
         # Step 3: Choose the first edition from the list.
         chosen_edition = editions[0]
         chosen_goodreads_id = chosen_edition.get('goodreads_id')
         if not chosen_goodreads_id:
-            print("Chosen edition has no Goodreads id; using main book data.")
-            return main_book_data
+            print("Chosen edition has no Goodreads id")
+            return None
 
         # Step 4: Fully scrape the chosen edition page.
         final_book_data = self.book_scraper.scrape_book(chosen_goodreads_id)
         if not final_book_data:
-            print("Failed to fully scrape chosen edition; using main book data.")
-            return main_book_data
+            print("Failed to fully scrape chosen edition")
+            return None
 
         return final_book_data
