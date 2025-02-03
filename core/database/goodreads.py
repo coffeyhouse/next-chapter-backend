@@ -105,15 +105,15 @@ class GoodreadsDB(BaseDB):
                         raise Exception("Failed to import book data")
 
                     # Import authors
-                    if not self._import_authors(conn, goodreads_id, goodreads_data.get('authors', [])):
+                    if not self._import_authors(conn, goodreads_data['work_id'], goodreads_data.get('authors', [])):
                         raise Exception("Failed to import authors")
 
                     # Import series
-                    if not self._import_series(conn, goodreads_id, goodreads_data.get('series', [])):
+                    if not self._import_series(conn, goodreads_data['work_id'], goodreads_data.get('series', [])):
                         raise Exception("Failed to import series")
 
                     # Import genres
-                    if not self._import_genres(conn, goodreads_id, goodreads_data.get('genres', [])):
+                    if not self._import_genres(conn, goodreads_data['work_id'], goodreads_data.get('genres', [])):
                         raise Exception("Failed to import genres")
 
                     conn.execute("COMMIT")
@@ -138,6 +138,7 @@ class GoodreadsDB(BaseDB):
             book = {
                 'goodreads_id': calibre_data['goodreads_id'],
                 'title': goodreads_data['title'],
+                'work_id': goodreads_data['work_id'],
                 'published_date': goodreads_data['published_date'],
                 'published_state': goodreads_data['published_state'],
                 'language': goodreads_data['language'],
@@ -148,9 +149,9 @@ class GoodreadsDB(BaseDB):
                 'goodreads_votes': goodreads_data['goodreads_votes'],
                 'description': goodreads_data['description'],
                 'image_url': goodreads_data['image_url'],
-                'similar_books_id': goodreads_data['work_id'],
                 'source': 'library',
                 'hidden': False,
+                'last_synced_at': now,
                 'created_at': now,
                 'updated_at': now
             }
@@ -172,9 +173,11 @@ class GoodreadsDB(BaseDB):
                 'title': calibre_data['title'],
                 'calibre_id': calibre_data['calibre_id'],
                 'goodreads_id': calibre_data['goodreads_id'],
-                'isbn': calibre_data['isbn'],
+                'work_id': goodreads_data['work_id'],
+                'isbn': calibre_data['isbn'],                
+                'last_synced_at': now,
                 'created_at': now,
-                'updated_at': now
+                'updated_at': now,
             }
             
             fields = list(library.keys())
@@ -194,7 +197,7 @@ class GoodreadsDB(BaseDB):
             print(f"Error importing book data: {e}")
             return False
 
-    def _import_authors(self, conn: sqlite3.Connection, book_id: str, authors: List[Dict[str, Any]]) -> bool:
+    def _import_authors(self, conn: sqlite3.Connection, work_id: str, authors: List[Dict[str, Any]]) -> bool:
         """Import authors and author-book relationships"""
         try:
             now = datetime.now().isoformat()
@@ -221,7 +224,7 @@ class GoodreadsDB(BaseDB):
                 
                 # Insert author-book relationship
                 relation_data = {
-                    'book_id': book_id,
+                    'work_id': work_id,
                     'author_id': author['goodreads_id'],
                     'role': author['role'],
                     'created_at': now,
@@ -235,8 +238,8 @@ class GoodreadsDB(BaseDB):
                 conn.execute(f"""
                     INSERT INTO book_author ({','.join(fields)})
                     VALUES ({placeholders})
-                    ON CONFLICT(book_id, author_id) DO UPDATE SET
-                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'author_id'])}
+                    ON CONFLICT(work_id, author_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['work_id', 'author_id'])}
                 """, values)
             
             return True
@@ -245,7 +248,7 @@ class GoodreadsDB(BaseDB):
             print(f"Error importing authors: {e}")
             return False
 
-    def _import_series(self, conn: sqlite3.Connection, book_id: str, series_list: List[Dict[str, Any]]) -> bool:
+    def _import_series(self, conn: sqlite3.Connection, work_id: str, series_list: List[Dict[str, Any]]) -> bool:
         """Import series and book-series relationships"""
         try:
             now = datetime.now().isoformat()
@@ -275,7 +278,7 @@ class GoodreadsDB(BaseDB):
                 
                 # Insert book-series relationship
                 relation_data = {
-                    'book_id': book_id,
+                    'work_id': work_id,
                     'series_id': series['goodreads_id'],
                     'series_order': series['order'],
                     'created_at': now,
@@ -289,8 +292,8 @@ class GoodreadsDB(BaseDB):
                 conn.execute(f"""
                     INSERT INTO book_series ({','.join(fields)})
                     VALUES ({placeholders})
-                    ON CONFLICT(book_id, series_id) DO UPDATE SET
-                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'series_id'])}
+                    ON CONFLICT(work_id, series_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['work_id', 'series_id'])}
                 """, values)
             
             return True
@@ -299,7 +302,7 @@ class GoodreadsDB(BaseDB):
             print(f"Error importing series: {e}")
             return False
 
-    def _import_genres(self, conn: sqlite3.Connection, book_id: str, genres: List[Dict[str, Any]]) -> bool:
+    def _import_genres(self, conn: sqlite3.Connection, work_id: str, genres: List[Dict[str, Any]]) -> bool:
         """Import genres and book-genre relationships"""
         try:
             now = datetime.now().isoformat()
@@ -326,7 +329,7 @@ class GoodreadsDB(BaseDB):
                 
                 # Insert book-genre relationship
                 relation_data = {
-                    'book_id': book_id,
+                    'work_id': work_id,
                     'genre_id': genre_id,
                     'created_at': now,
                     'updated_at': now
@@ -339,8 +342,8 @@ class GoodreadsDB(BaseDB):
                 conn.execute(f"""
                     INSERT INTO book_genre ({','.join(fields)})
                     VALUES ({placeholders})
-                    ON CONFLICT(book_id, genre_id) DO UPDATE SET
-                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'genre_id'])}
+                    ON CONFLICT(work_id, genre_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['work_id', 'genre_id'])}
                 """, values)
             
             return True

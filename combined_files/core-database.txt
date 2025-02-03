@@ -165,32 +165,39 @@ class BaseDB:
             return []
 
 
-# core/database/goodreads.py
-from typing import Dict, List, Any, Optional
+# core\database\goodreads.py
+
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 import sqlite3
 from .base import BaseDB
 from .schema import init_db
+from ..scrapers.book_scraper import BookScraper
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GoodreadsDB(BaseDB):
     def __init__(self, db_path: str = "books.db"):
         super().__init__(db_path)
         self._ensure_db_exists()
+        self.book_scraper = BookScraper(scrape=True)
     
     def _ensure_db_exists(self):
-        """Create database if it doesn't exist"""
         if not Path(self.db_path).exists():
             init_db(self.db_path)
-    
+
     def import_calibre_books(self, calibre_path: str, limit: Optional[int] = None) -> tuple[int, int]:
-        """
-        Import books from Calibre
-        Returns (total_books, imported_count)
-        """
+        """Import books from Calibre that aren't already in the library table"""
         try:
+            # Get existing Goodreads IDs from library table
+            with self._get_connection() as conn:
+                cursor = conn.execute("SELECT goodreads_id FROM library")
+                existing_ids = {row[0] for row in cursor.fetchall()}
+            
+            # Get books from Calibre
             with sqlite3.connect(calibre_path) as calibre_conn:
-                # Your existing Calibre import query
                 query = """
                     SELECT 
                         books.id AS calibre_id,
@@ -213,68 +220,307 @@ class GoodreadsDB(BaseDB):
                     WHERE gr.val IS NOT NULL
                 """
                 
-                if limit:
-                    query += f" LIMIT {limit}"
-                    
                 cursor = calibre_conn.execute(query)
                 books = cursor.fetchall()
-                total = len(books)
+                
+                # Filter out existing books and apply limit
+                new_books = [
+                    book for book in books 
+                    if book[2] not in existing_ids  # index 2 is goodreads_id
+                ]
+                if limit:
+                    new_books = new_books[:limit]
+                
+                print(f"Found {len(new_books)} new books to import")
+                
+                processed = 0
                 imported = 0
                 
-                for book in books:
-                    if self.import_calibre_book(dict(zip(
+                for book in new_books:
+                    calibre_data = dict(zip(
                         ['calibre_id', 'title', 'goodreads_id', 'isbn', 
                          'warren_last_read', 'ruth_last_read'], 
                         book
-                    ))):
+                    ))
+                    
+                    if self._import_single_book(calibre_data):
                         imported += 1
+                        print(f"Successfully imported {calibre_data['title']} ({imported}/{len(new_books)})")
+                    else:
+                        print(f"Failed to import {calibre_data['title']}")
+                    processed += 1
                 
-                return total, imported
+                return processed, imported
                 
         except Exception as e:
             print(f"Error importing from Calibre: {e}")
             return 0, 0
-    
-    def import_calibre_book(self, book_data: Dict[str, Any]) -> bool:
-        """Import single book from Calibre"""
+
+    def _import_single_book(self, calibre_data: Dict[str, Any]) -> bool:
+        """Import a single book and all its related data"""
         try:
-            now = datetime.now().isoformat()
-            
-            # Insert into books table
-            book = {
-                'goodreads_id': book_data['goodreads_id'],
-                'title': book_data['title'],
-                'isbn': book_data['isbn'],
-                'calibre_id': book_data['calibre_id'],
-                'source': 'library',
-                'created_at': now,
-                'updated_at': now
-            }
-            
-            if not self.upsert('books', book, 'goodreads_id')[0]:
+            # Scrape Goodreads data
+            goodreads_id = calibre_data['goodreads_id']
+            goodreads_data = self.book_scraper.scrape_book(goodreads_id)
+            if not goodreads_data:
+                print(f"Failed to scrape Goodreads data for ID: {goodreads_id}")
                 return False
-            
-            # Insert into library table
-            library = {
-                'title': book_data['title'],
-                'calibre_id': book_data['calibre_id'],
-                'goodreads_id': book_data['goodreads_id'],
-                'isbn': book_data['isbn'],
-                'created_at': now,
-                'updated_at': now
-            }
-            
-            if not self.upsert('library', library, 'goodreads_id')[0]:
-                return False
-            
-            return True
-            
+
+            with self._get_connection() as conn:
+                conn.execute("BEGIN")
+                try:
+                    # Import main book data
+                    if not self._import_book_data(conn, calibre_data, goodreads_data):
+                        raise Exception("Failed to import book data")
+
+                    # Import authors
+                    if not self._import_authors(conn, goodreads_id, goodreads_data.get('authors', [])):
+                        raise Exception("Failed to import authors")
+
+                    # Import series
+                    if not self._import_series(conn, goodreads_id, goodreads_data.get('series', [])):
+                        raise Exception("Failed to import series")
+
+                    # Import genres
+                    if not self._import_genres(conn, goodreads_id, goodreads_data.get('genres', [])):
+                        raise Exception("Failed to import genres")
+
+                    conn.execute("COMMIT")
+                    return True
+
+                except Exception as e:
+                    conn.execute("ROLLBACK")
+                    print(f"Transaction failed: {e}")
+                    return False
+
         except Exception as e:
             print(f"Error importing book: {e}")
             return False
 
+    def _import_book_data(self, conn: sqlite3.Connection, calibre_data: Dict[str, Any], 
+                         goodreads_data: Dict[str, Any]) -> bool:
+        """Import main book data"""
+        try:
+            now = datetime.now().isoformat()
+            
+            # Prepare books record
+            book = {
+                'goodreads_id': calibre_data['goodreads_id'],
+                'title': goodreads_data['title'],
+                'work_id': goodreads_data['work_id'],
+                'published_date': goodreads_data['published_date'],
+                'published_state': goodreads_data['published_state'],
+                'language': goodreads_data['language'],
+                'calibre_id': calibre_data['calibre_id'],
+                'pages': goodreads_data['pages'],
+                'isbn': calibre_data['isbn'] or goodreads_data['isbn'],
+                'goodreads_rating': goodreads_data['goodreads_rating'],
+                'goodreads_votes': goodreads_data['goodreads_votes'],
+                'description': goodreads_data['description'],
+                'image_url': goodreads_data['image_url'],
+                'source': 'library',
+                'hidden': False,
+                'created_at': now,
+                'updated_at': now
+            }
+            
+            # Insert into books table
+            fields = list(book.keys())
+            placeholders = ','.join(['?'] * len(fields))
+            values = [book[field] for field in fields]
+            
+            conn.execute(f"""
+                INSERT INTO book ({','.join(fields)})
+                VALUES ({placeholders})
+                ON CONFLICT(goodreads_id) DO UPDATE SET
+                {','.join(f"{field}=excluded.{field}" for field in fields if field != 'goodreads_id')}
+            """, values)
+            
+            # Insert into library table
+            library = {
+                'title': calibre_data['title'],
+                'calibre_id': calibre_data['calibre_id'],
+                'goodreads_id': calibre_data['goodreads_id'],
+                'isbn': calibre_data['isbn'],
+                'created_at': now,
+                'updated_at': now
+            }
+            
+            fields = list(library.keys())
+            placeholders = ','.join(['?'] * len(fields))
+            values = [library[field] for field in fields]
+            
+            conn.execute(f"""
+                INSERT INTO library ({','.join(fields)})
+                VALUES ({placeholders})
+                ON CONFLICT(goodreads_id) DO UPDATE SET
+                {','.join(f"{field}=excluded.{field}" for field in fields if field != 'goodreads_id')}
+            """, values)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing book data: {e}")
+            return False
 
-# core/database/schema.py
+    def _import_authors(self, conn: sqlite3.Connection, book_id: str, authors: List[Dict[str, Any]]) -> bool:
+        """Import authors and author-book relationships"""
+        try:
+            now = datetime.now().isoformat()
+            
+            for author in authors:
+                # Insert author
+                author_data = {
+                    'goodreads_id': author['goodreads_id'],
+                    'name': author['name'],
+                    'created_at': now,
+                    'updated_at': now
+                }
+                
+                fields = list(author_data.keys())
+                placeholders = ','.join(['?'] * len(fields))
+                values = [author_data[field] for field in fields]
+                
+                conn.execute(f"""
+                    INSERT INTO author ({','.join(fields)})
+                    VALUES ({placeholders})
+                    ON CONFLICT(goodreads_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field != 'goodreads_id')}
+                """, values)
+                
+                # Insert author-book relationship
+                relation_data = {
+                    'book_id': book_id,
+                    'author_id': author['goodreads_id'],
+                    'role': author['role'],
+                    'created_at': now,
+                    'updated_at': now
+                }
+                
+                fields = list(relation_data.keys())
+                placeholders = ','.join(['?'] * len(fields))
+                values = [relation_data[field] for field in fields]
+                
+                conn.execute(f"""
+                    INSERT INTO book_author ({','.join(fields)})
+                    VALUES ({placeholders})
+                    ON CONFLICT(book_id, author_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'author_id'])}
+                """, values)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing authors: {e}")
+            return False
+
+    def _import_series(self, conn: sqlite3.Connection, book_id: str, series_list: List[Dict[str, Any]]) -> bool:
+        """Import series and book-series relationships"""
+        try:
+            now = datetime.now().isoformat()
+            
+            for series in series_list:
+                if not series['goodreads_id']:
+                    continue
+                    
+                # Insert series
+                series_data = {
+                    'goodreads_id': series['goodreads_id'],
+                    'title': series['name'],
+                    'created_at': now,
+                    'updated_at': now
+                }
+                
+                fields = list(series_data.keys())
+                placeholders = ','.join(['?'] * len(fields))
+                values = [series_data[field] for field in fields]
+                
+                conn.execute(f"""
+                    INSERT INTO series ({','.join(fields)})
+                    VALUES ({placeholders})
+                    ON CONFLICT(goodreads_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field != 'goodreads_id')}
+                """, values)
+                
+                # Insert book-series relationship
+                relation_data = {
+                    'book_id': book_id,
+                    'series_id': series['goodreads_id'],
+                    'series_order': series['order'],
+                    'created_at': now,
+                    'updated_at': now
+                }
+                
+                fields = list(relation_data.keys())
+                placeholders = ','.join(['?'] * len(fields))
+                values = [relation_data[field] for field in fields]
+                
+                conn.execute(f"""
+                    INSERT INTO book_series ({','.join(fields)})
+                    VALUES ({placeholders})
+                    ON CONFLICT(book_id, series_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'series_id'])}
+                """, values)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing series: {e}")
+            return False
+
+    def _import_genres(self, conn: sqlite3.Connection, book_id: str, genres: List[Dict[str, Any]]) -> bool:
+        """Import genres and book-genre relationships"""
+        try:
+            now = datetime.now().isoformat()
+            
+            for genre in genres:
+                # First ensure genre exists and get its ID
+                cursor = conn.execute(
+                    "SELECT id FROM genre WHERE name = ?",
+                    (genre['name'],)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    genre_id = result[0]
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO genre (name, created_at, updated_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (genre['name'], now, now)
+                    )
+                    genre_id = cursor.lastrowid
+                
+                # Insert book-genre relationship
+                relation_data = {
+                    'book_id': book_id,
+                    'genre_id': genre_id,
+                    'created_at': now,
+                    'updated_at': now
+                }
+                
+                fields = list(relation_data.keys())
+                placeholders = ','.join(['?'] * len(fields))
+                values = [relation_data[field] for field in fields]
+                
+                conn.execute(f"""
+                    INSERT INTO book_genre ({','.join(fields)})
+                    VALUES ({placeholders})
+                    ON CONFLICT(book_id, genre_id) DO UPDATE SET
+                    {','.join(f"{field}=excluded.{field}" for field in fields if field not in ['book_id', 'genre_id'])}
+                """, values)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing genres: {e}")
+            return False
+
+
+# core\database\schema.py
+
 from pathlib import Path
 import sqlite3
 
@@ -286,11 +532,11 @@ def init_db(db_path: str = "books.db"):
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         
-        # Create tables
         conn.executescript("""
-            -- Books table
-            CREATE TABLE IF NOT EXISTS books (
+            -- Books table (main entity)
+            CREATE TABLE IF NOT EXISTS book (
                 goodreads_id TEXT PRIMARY KEY,
+                work_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 published_date TEXT,
                 published_state TEXT,
@@ -302,7 +548,6 @@ def init_db(db_path: str = "books.db"):
                 goodreads_votes INTEGER,
                 description TEXT,
                 image_url TEXT,
-                similar_books_id TEXT,
                 source TEXT,
                 hidden BOOLEAN DEFAULT FALSE,
                 created_at TEXT NOT NULL,
@@ -310,20 +555,21 @@ def init_db(db_path: str = "books.db"):
                 last_synced_at TEXT
             );
             
-            -- Library table
+            -- Library table (unique concept)
             CREATE TABLE IF NOT EXISTS library (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 calibre_id INTEGER,
                 goodreads_id TEXT UNIQUE,
+                work_id TEXT NOT NULL,
                 isbn TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_synced_at TEXT,
-                FOREIGN KEY (goodreads_id) REFERENCES books(goodreads_id)
+                FOREIGN KEY (work_id) REFERENCES book(work_id)
             );
             
-            -- Series table
+            -- Series table (main entity)
             CREATE TABLE IF NOT EXISTS series (
                 goodreads_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -334,18 +580,18 @@ def init_db(db_path: str = "books.db"):
             
             -- Book-Series relationship
             CREATE TABLE IF NOT EXISTS book_series (
-                book_id TEXT,
+                work_id TEXT,
                 series_id TEXT,
                 series_order REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, series_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
+                PRIMARY KEY (work_id, series_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
                 FOREIGN KEY (series_id) REFERENCES series(goodreads_id)
             );
             
-            -- Authors table
-            CREATE TABLE IF NOT EXISTS authors (
+            -- Authors table (main entity)
+            CREATE TABLE IF NOT EXISTS author (
                 goodreads_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 bio TEXT,
@@ -355,20 +601,20 @@ def init_db(db_path: str = "books.db"):
                 last_synced_at TEXT
             );
             
-            -- Author-Book relationship
-            CREATE TABLE IF NOT EXISTS author_books (
-                book_id TEXT,
+            -- Book-Author relationship
+            CREATE TABLE IF NOT EXISTS book_author (
+                work_id TEXT,
                 author_id TEXT,
                 role TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, author_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
-                FOREIGN KEY (author_id) REFERENCES authors(goodreads_id)
+                PRIMARY KEY (work_id, author_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
+                FOREIGN KEY (author_id) REFERENCES author(goodreads_id)
             );
             
-            -- Genres table
-            CREATE TABLE IF NOT EXISTS genres (
+            -- Genres table (main entity)
+            CREATE TABLE IF NOT EXISTS genre (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
@@ -376,18 +622,18 @@ def init_db(db_path: str = "books.db"):
             );
             
             -- Book-Genre relationship
-            CREATE TABLE IF NOT EXISTS book_genres (
+            CREATE TABLE IF NOT EXISTS book_genre (
+                work_id TEXT,
                 genre_id INTEGER,
-                book_id TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (genre_id, book_id),
-                FOREIGN KEY (genre_id) REFERENCES genres(id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id)
+                PRIMARY KEY (work_id, genre_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
+                FOREIGN KEY (genre_id) REFERENCES genre(id)
             );
             
-            -- Awards table
-            CREATE TABLE IF NOT EXISTS awards (
+            -- Awards table (main entity)
+            CREATE TABLE IF NOT EXISTS award (
                 goodreads_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -395,30 +641,30 @@ def init_db(db_path: str = "books.db"):
             );
             
             -- Book-Award relationship
-            CREATE TABLE IF NOT EXISTS book_awards (
-                book_id TEXT,
+            CREATE TABLE IF NOT EXISTS book_award (
+                work_id TEXT,
                 award_id TEXT,
                 category TEXT,
                 year INTEGER,
                 designation TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, award_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
-                FOREIGN KEY (award_id) REFERENCES awards(goodreads_id)
+                PRIMARY KEY (work_id, award_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
+                FOREIGN KEY (award_id) REFERENCES award(goodreads_id)
             );
             
-            -- Users table
-            CREATE TABLE IF NOT EXISTS users (
+            -- Users table (main entity)
+            CREATE TABLE IF NOT EXISTS user (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
             
-            -- Book-User relationship (reading status)
-            CREATE TABLE IF NOT EXISTS book_users (
-                book_id TEXT,
+            -- Book-User relationship
+            CREATE TABLE IF NOT EXISTS book_user (
+                work_id TEXT,
                 user_id INTEGER,
                 status TEXT NOT NULL,
                 source TEXT,
@@ -426,43 +672,34 @@ def init_db(db_path: str = "books.db"):
                 finished_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, user_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                PRIMARY KEY (work_id, user_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
+                FOREIGN KEY (user_id) REFERENCES user(id)
             );
             
-            -- Similar Books relationship
-            CREATE TABLE IF NOT EXISTS similar_books (
-                book_id TEXT,
-                similar_book_id TEXT,
+            -- Book-Similar relationship
+            CREATE TABLE IF NOT EXISTS book_similar (
+                work_id TEXT,
+                similar_work_id TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, similar_book_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
-                FOREIGN KEY (similar_book_id) REFERENCES books(goodreads_id)
-            );
-            
-            -- Book Editions relationship
-            CREATE TABLE IF NOT EXISTS book_editions (
-                book_id TEXT,
-                edition_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (book_id, edition_id),
-                FOREIGN KEY (book_id) REFERENCES books(goodreads_id),
-                FOREIGN KEY (edition_id) REFERENCES books(goodreads_id)
+                PRIMARY KEY (work_id, similar_work_id),
+                FOREIGN KEY (work_id) REFERENCES book(work_id),
+                FOREIGN KEY (similar_work_id) REFERENCES book(work_id)
             );
         """)
         
         # Create performance indexes
         conn.executescript("""
-            CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
+            CREATE INDEX IF NOT EXISTS idx_book_title ON book(title);
+            CREATE INDEX IF NOT EXISTS idx_book_work_id ON book(work_id);
             CREATE INDEX IF NOT EXISTS idx_library_calibre_id ON library(calibre_id);
             CREATE INDEX IF NOT EXISTS idx_library_isbn ON library(isbn);
+            CREATE INDEX IF NOT EXISTS idx_library_work_id ON library(work_id);
             CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
-            CREATE INDEX IF NOT EXISTS idx_authors_name ON authors(name);
-            CREATE INDEX IF NOT EXISTS idx_book_users_status ON book_users(status);
-            CREATE INDEX IF NOT EXISTS idx_book_users_finished ON book_users(finished_at);
+            CREATE INDEX IF NOT EXISTS idx_author_name ON author(name);
+            CREATE INDEX IF NOT EXISTS idx_book_user_status ON book_user(status);
+            CREATE INDEX IF NOT EXISTS idx_book_user_finished ON book_user(finished_at);
         """)
 
 if __name__ == "__main__":
