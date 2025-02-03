@@ -5,6 +5,7 @@ import sqlite3
 from .base import BaseDB
 from .schema import init_db
 from ..scrapers.book_scraper import BookScraper
+from core.resolvers.book_resolver import BookResolver
 import logging
 
 logger = logging.getLogger(__name__)
@@ -88,45 +89,42 @@ class GoodreadsDB(BaseDB):
             return 0, 0
 
     def _import_single_book(self, calibre_data: Dict[str, Any]) -> bool:
-        """Import a single book and all its related data"""
         try:
-            # Scrape Goodreads data
             goodreads_id = calibre_data['goodreads_id']
-            goodreads_data = self.book_scraper.scrape_book(goodreads_id)
-            if not goodreads_data:
-                print(f"Failed to scrape Goodreads data for ID: {goodreads_id}")
+            resolver = BookResolver(scrape=True)
+            
+            # Get the fully resolved book data (details from the chosen edition)
+            final_book_data = resolver.resolve_book(goodreads_id)
+            if not final_book_data:
+                print(f"Failed to resolve a proper edition for book ID: {goodreads_id}")
                 return False
-
+            
             with self._get_connection() as conn:
                 conn.execute("BEGIN")
                 try:
-                    # Import main book data
-                    if not self._import_book_data(conn, calibre_data, goodreads_data):
+                    # Insert the main book record
+                    if not self._import_book_data(conn, calibre_data, final_book_data):
                         raise Exception("Failed to import book data")
-
-                    # Import authors
-                    if not self._import_authors(conn, goodreads_data['work_id'], goodreads_data.get('authors', [])):
+                    
+                    # Now insert related data using the fully scraped edition's details.
+                    # Make sure final_book_data has the relationships.
+                    if not self._import_authors(conn, final_book_data['work_id'], final_book_data.get('authors', [])):
                         raise Exception("Failed to import authors")
-
-                    # Import series
-                    if not self._import_series(conn, goodreads_data['work_id'], goodreads_data.get('series', [])):
+                    if not self._import_series(conn, final_book_data['work_id'], final_book_data.get('series', [])):
                         raise Exception("Failed to import series")
-
-                    # Import genres
-                    if not self._import_genres(conn, goodreads_data['work_id'], goodreads_data.get('genres', [])):
+                    if not self._import_genres(conn, final_book_data['work_id'], final_book_data.get('genres', [])):
                         raise Exception("Failed to import genres")
-
+                        
                     conn.execute("COMMIT")
                     return True
-
                 except Exception as e:
                     conn.execute("ROLLBACK")
                     print(f"Transaction failed: {e}")
                     return False
-
         except Exception as e:
             print(f"Error importing book: {e}")
             return False
+
 
     def _import_book_data(self, conn: sqlite3.Connection, calibre_data: Dict[str, Any], 
                          goodreads_data: Dict[str, Any]) -> bool:
@@ -136,7 +134,7 @@ class GoodreadsDB(BaseDB):
             
             # Prepare books record
             book = {
-                'goodreads_id': calibre_data['goodreads_id'],
+                'goodreads_id': goodreads_data['goodreads_id'],
                 'title': goodreads_data['title'],
                 'work_id': goodreads_data['work_id'],
                 'published_date': goodreads_data['published_date'],
