@@ -1,0 +1,57 @@
++-- cli/
+|   +-- commands/
+|   |-- __init__.py [empty]
+|   |-- author.py [empty]
+|   |-- book.py [empty]
+|   |-- dev.py
+|   |-- library.py
+|   |-- scraper.py
+|   |-- series.py [empty]
+|-- __init__.py [empty]
+|-- main.py
++-- combined_files/
+|-- cli-commands.txt
+|-- cli.txt
+|-- core-database.txt
+|-- core-scrapers.txt
+|-- core-utils.txt
++-- core/
+|   +-- database/
+|   |-- __init__.py
+|   |-- base.py
+|   |-- goodreads.py
+|   |-- schema.py
+|   +-- scrapers/
+|   |-- __init__.py [empty]
+|   |-- author_books_scraper.py
+|   |-- author_scraper.py
+|   |-- book_scraper.py
+|   |-- editions_scraper.py
+|   |-- series_scraper.py
+|   |-- similar_scraper.py
+|   +-- services/
+|   |-- __init__.py [empty]
+|   |-- author_service.py [empty]
+|   |-- book_service.py [empty]
+|   |-- series_service.py [empty]
+|   +-- utils/
+|   |-- __init__.py [empty]
+|   |-- http.py
+|   |-- image.py
+|   |-- rate_limit.py [empty]
++-- data/
+|   +-- cache/
+|   |   +-- author/
+|   |   |   +-- list/
+|   |   |   +-- show/
+|   |   +-- book/
+|   |   |   +-- show/
+|   |   |   +-- similar/
+|   |   +-- series/
+|   |   |   +-- show/
+|   |   +-- work/
+|   |   |   +-- editions/
+|   +-- db/
+|   +-- images/
+|   |   +-- author/
+|   |   +-- book/

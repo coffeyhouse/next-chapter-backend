@@ -146,13 +146,24 @@ class BookScraper:
         if next_data:
             try:
                 data = json.loads(next_data.string)
-                for key, value in data['props']['pageProps']['apolloState'].items():
-                    if key.startswith('Book:') and isinstance(value, dict):
-                        return value.get('description')
+                apollo_state = data['props']['pageProps']['apolloState']
+                
+                # Find the book ID from the query
+                book_id = None
+                for key, value in apollo_state.items():
+                    if key == 'ROOT_QUERY':
+                        for query_key in value:
+                            if 'getBookByLegacyId' in query_key:
+                                book_id = value[query_key]['__ref']
+                                break
+                
+                # Get description using book ID
+                if book_id and book_id in apollo_state:
+                    return apollo_state[book_id].get('description')
+                    
             except (json.JSONDecodeError, KeyError):
                 pass
         return None
-    
     def _extract_book_details(self, soup) -> dict:
         """Extract book details from schema.org data"""
         schema = soup.find('script', {'type': 'application/ld+json'})
