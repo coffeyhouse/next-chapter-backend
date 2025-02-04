@@ -13,7 +13,7 @@ class EditionsScraper:
     
     def scrape_editions(self, work_id: str) -> list[dict]:
         """
-        Get all editions of a work
+        Get editions from first page of a work
         Returns list of editions with format:
         [
             {
@@ -29,41 +29,25 @@ class EditionsScraper:
         ]
         """
         print(f"Scraping editions for work: {work_id}")
-        editions = []
-        current_page = 1
         
-        while True:
-            # Get page content
-            url = self._get_page_url(work_id, current_page)
-            if not self.downloader.download_url(url):
-                break
-            
-            # Read the downloaded page
-            html = self._read_html(work_id, current_page)
-            if not html:
-                break
-            
-            try:
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # Get editions from this page
-                page_editions = self._extract_editions(soup)
-                editions.extend(page_editions)
-                
-                # Check pagination
-                pagination = self._extract_pagination(soup)
-                print(f"Processing page {pagination['current_page']} of {pagination['total_pages']}")
-                
-                if current_page >= pagination['total_pages']:
-                    break
-                
-                current_page += 1
-                
-            except Exception as e:
-                print(f"Error processing page {current_page}: {e}")
-                break
+        # Get first page content
+        url = self._get_page_url(work_id, 1)
+        if not self.downloader.download_url(url):
+            return []
         
-        return editions
+        # Read the downloaded page
+        html = self._read_html(work_id, 1)
+        if not html:
+            return []
+        
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            editions = self._extract_editions(soup)
+            return editions
+            
+        except Exception as e:
+            print(f"Error processing page: {e}")
+            return []
     
     def _get_page_url(self, work_id: str, page: int) -> str:
         """Get URL for editions page"""
@@ -133,10 +117,13 @@ class EditionsScraper:
                 pub_div = details.find('div', text=re.compile(r'Published|Expected publication'))
                 if pub_div:
                     text = pub_div.text.strip()
-                    # Extract just the date portion
-                    date_match = re.search(r'(?:Published|Expected publication)\s+(.*?)(?:\s+by\s+|$)', text)
+                    # Extract date portion, excluding "by Publisher" text
+                    date_match = re.search(r'(?:Published|Expected publication)\s+(.*?)(?:\s+by\s+.*)?$', text)
                     if date_match:
-                        edition['published_date'] = date_match.group(1).strip()
+                        date_text = date_match.group(1).strip()
+                        # Only set if it looks like a real date (not just "by Publisher")
+                        if not date_text.startswith('by '):
+                            edition['published_date'] = date_text
                 
                 # Get language
                 language_div = details.find('div', text=lambda x: x and 'Edition language:' in x)
@@ -157,38 +144,15 @@ class EditionsScraper:
             # Only add if it meets all criteria:
             # - Has goodreads_id and title
             # - Has pages
+            # - Has valid published date (not just "by Publisher")
             # - Is in English
             # - Has valid format
             if (edition['goodreads_id'] and edition['title'] and 
                 edition['pages'] and
                 edition['published_date'] and
+                not edition['published_date'].startswith('by ') and
                 edition['language'] == 'English' and
                 edition['format'] in valid_formats):
                 editions.append(edition)
         
         return editions
-    
-    def _extract_pagination(self, soup) -> dict:
-        """Extract pagination information"""
-        pagination = {'current_page': 1, 'total_pages': 1}
-        
-        div = soup.find('div', style=lambda x: x and 'text-align: right' in x)
-        if div:
-            current = div.find('em', class_='current')
-            if current:
-                try:
-                    pagination['current_page'] = int(current.text.strip())
-                except ValueError:
-                    pass
-            
-            max_page = 1
-            for link in div.find_all('a'):
-                try:
-                    page_num = int(link.text.strip())
-                    max_page = max(max_page, page_num)
-                except ValueError:
-                    continue
-            
-            pagination['total_pages'] = max(max_page, pagination['current_page'])
-        
-        return pagination

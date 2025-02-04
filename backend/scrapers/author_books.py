@@ -19,7 +19,8 @@ def get_author_books_url(author_id, page=1):
 def extract_author_name(soup):
     name_link = soup.find('a', class_='authorName')
     if name_link:
-        return name_link.text.strip()
+        # Normalize whitespace in author name
+        return ' '.join(name_link.text.split())
     return None
 
 def extract_books(soup):

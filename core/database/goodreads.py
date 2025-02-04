@@ -12,9 +12,41 @@ from .schema import init_db
 from ..scrapers.book_scraper import BookScraper
 from core.resolvers.book_resolver import BookResolver
 from ..scrapers.series_scraper import SeriesScraper
-
+from ..scrapers.author_scraper import AuthorScraper
+from ..scrapers.author_books_scraper import AuthorBooksScraper
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Helper functions for merging book data and determining source priority.
+# -----------------------------------------------------------------------------
+
+def choose_source(existing_source: str, new_source: Optional[str]) -> str:
+    """
+    Determine which source to keep based on a priority mapping.
+    
+    For example:
+      - 'library' is highest priority.
+      - 'series', 'author', and 'similar' get priority 2.
+      - 'scrape' is the default (priority 1).
+    
+    If the new source is provided and its priority is greater than or equal
+    to the existing source, then use the new source. Otherwise, keep the existing one.
+    """
+    priority = {
+        'library': 3,
+        'series': 2,
+        'author': 2,
+        'similar': 2,
+        'scrape': 1
+    }
+    
+    if not new_source:
+        return existing_source or 'scrape'
+    if not existing_source:
+        return new_source
+    if priority.get(new_source, 0) >= priority.get(existing_source, 0):
+        return new_source
+    return existing_source
 
 def merge_book_data(existing: dict, new_data: dict) -> dict:
     """
@@ -23,13 +55,13 @@ def merge_book_data(existing: dict, new_data: dict) -> dict:
     Handles source and the date fields separately.
     
     Args:
-        existing: dict from the database.
-        new_data: dict scraped or imported from another source.
+        existing: Dictionary of the existing database record.
+        new_data: Dictionary of the new data (scraped or imported).
         
     Returns:
-        A merged dict with updated fields.
+        A merged dictionary with updated fields.
     """
-    # List of fields that we compare and update if they differ.
+    # Fields that we want to update if they differ.
     updatable_fields = [
         'title', 'work_id', 'published_date', 'published_state',
         'language', 'pages', 'isbn', 'goodreads_rating',
@@ -47,11 +79,11 @@ def merge_book_data(existing: dict, new_data: dict) -> dict:
         else:
             merged[field] = existing.get(field)
     
-    # Preserve existing source if it is "library"; otherwise, use new data (defaulting to "scrape")
-    if existing.get('source') == 'library':
-        merged['source'] = existing['source']
-    else:
-        merged['source'] = new_data.get('source', 'scrape')
+    # For source, use choose_source to decide whether to update.
+    existing_source = existing.get('source', 'scrape')
+    new_source = new_data.get('source')  # Could be 'series', 'author', 'similar', etc.
+    print("existing_source", existing_source, "new_source", new_source)
+    merged['source'] = choose_source(existing_source, new_source)
     
     # Always preserve the original created_at timestamp.
     merged['created_at'] = existing.get('created_at')
@@ -69,6 +101,9 @@ def merge_book_data(existing: dict, new_data: dict) -> dict:
     
     return merged
 
+# -----------------------------------------------------------------------------
+# Main class for the Goodreads database operations.
+# -----------------------------------------------------------------------------
 
 class GoodreadsDB(BaseDB):
     def __init__(self, db_path: str = "books.db"):
@@ -83,32 +118,40 @@ class GoodreadsDB(BaseDB):
     def _import_single_book(self, calibre_data: Dict[str, Any]) -> bool:
         """
         Import a single book from any source with full resolution.
-        This function resolves the book data, then imports the base book data,
-        along with any Calibre-specific data and relationships.
+        Resolves the book data, then imports the base book data, along with
+        any Calibre-specific data and relationships.
+        
+        NOTE: To allow a series (or author/similar) sync to override the default
+        'scrape' source, we update the resolved data with any keys (e.g. 'source')
+        that are passed in via calibre_data.
         """
         try:
             goodreads_id = calibre_data['goodreads_id']
             resolver = BookResolver(scrape=True)
             
-            # Get the fully resolved book data (which may trigger a full scrape)
+            # Resolve the full book data (this will have 'source': 'scrape')
             final_book_data = resolver.resolve_book(goodreads_id)
             if not final_book_data:
                 print(f"Failed to resolve a proper edition for book ID: {goodreads_id}")
                 return False
+
+            # Update final_book_data with any provided override (e.g. source)
+            if 'source' in calibre_data:
+                final_book_data['source'] = calibre_data['source']         
             
             with self._get_connection() as conn:
                 conn.execute("BEGIN")
                 try:
-                    # Import the base book data (using our diff-and-merge logic)
+                    # Import the base book data using our diff-and-merge logic.
                     if not self._import_base_book_data(conn, final_book_data):
                         raise Exception("Failed to import base book data")
                     
-                    # Import Calibre-specific data if provided
+                    # If Calibre data is provided, import Calibre-specific information.
                     if calibre_data and 'calibre_id' in calibre_data:
                         if not self._import_calibre_data(conn, calibre_data, final_book_data['work_id']):
                             raise Exception("Failed to import Calibre data")
                     
-                    # Import relationships (authors, series, genres)
+                    # Import relationships (authors, series, genres).
                     if not self._import_authors(conn, final_book_data['work_id'], final_book_data.get('authors', [])):
                         raise Exception("Failed to import authors")
                     if not self._import_series(conn, final_book_data['work_id'], final_book_data.get('series', [])):
@@ -144,7 +187,7 @@ class GoodreadsDB(BaseDB):
             if row:
                 # Convert the existing row to a dictionary.
                 existing = dict(zip([col[0] for col in cursor.description], row))
-                # Merge the new data with the existing data.
+                # Merge the new data with the existing record.
                 merged_data = merge_book_data(existing, new_book_data)
                 # Prepare an UPDATE that sets only the merged fields.
                 update_fields = [field for field in merged_data if field != 'goodreads_id']
@@ -168,7 +211,7 @@ class GoodreadsDB(BaseDB):
                     'goodreads_votes': new_book_data.get('goodreads_votes'),
                     'description': new_book_data.get('description'),
                     'image_url': new_book_data.get('image_url'),
-                    'source': new_book_data.get('source', 'scrape'),
+                    'source': new_book_data.get('source'),
                     'hidden': new_book_data.get('hidden', False),
                     'created_at': now,
                     'updated_at': now,
@@ -188,7 +231,7 @@ class GoodreadsDB(BaseDB):
         try:
             now = datetime.now().isoformat()
             
-            # Update the book's source to "library" and record the Calibre id.
+            # Update the book's source to 'library' and record the Calibre ID.
             conn.execute("""
                 UPDATE book 
                 SET source = 'library', calibre_id = ?
@@ -442,7 +485,7 @@ class GoodreadsDB(BaseDB):
             limit: Maximum number of series to sync.
             
         Returns:
-            Tuple of (processed_count, imported_count).
+            A tuple of (processed_count, imported_count).
         """
         try:
             # Get unsynced series.
@@ -476,9 +519,12 @@ class GoodreadsDB(BaseDB):
                 for book in series_data['books']:
                     if book['goodreads_id']:
                         # Create minimal book data for import.
+                        # Here we pass the source as 'series' so that merge_book_data
+                        # can update the source if appropriate.
                         book_data = {
                             'goodreads_id': book['goodreads_id'],
-                            'title': book['title']
+                            'title': book['title'],
+                            'source': 'series'
                         }
                         
                         if self._import_single_book(book_data):
@@ -502,3 +548,130 @@ class GoodreadsDB(BaseDB):
         except Exception as e:
             logger.error(f"Error syncing series: {e}")
             return 0, 0
+        
+    def sync_authors(self, days_old: int = 30, limit: int = None) -> Tuple[int, int]:
+        """
+        Sync unsynced authors by scraping their pages and importing their books.
+        
+        Args:
+            days_old: Sync authors not updated in this many days
+            limit: Maximum number of authors to sync
+            
+        Returns:
+            Tuple of (processed_count, imported_count)
+        """
+        try:
+            # Get unsynced authors using our queries class
+            author_queries = AuthorQueries(self)
+            unsynced_authors = author_queries.get_unsynced_authors(days_old)
+            
+            if not unsynced_authors:
+                logger.info("No unsynced authors found")
+                return 0, 0
+            
+            # Apply limit if specified
+            if limit:
+                unsynced_authors = unsynced_authors[:limit]
+            
+            # Initialize our scrapers
+            author_scraper = AuthorScraper(scrape=True)
+            author_books_scraper = AuthorBooksScraper(scrape=True)
+            
+            processed = 0
+            imported = 0
+            
+            for author in unsynced_authors:
+                author_id = author['goodreads_id']
+                logger.info(f"Syncing author: {author['name']} ({author_id})")
+                
+                # First get the author's updated details
+                author_data = author_scraper.scrape_author(author_id)
+                if not author_data:
+                    logger.error(f"Failed to scrape author: {author_id}")
+                    continue
+                
+                # Update the author record
+                now = datetime.now().isoformat()
+                author_data['last_synced_at'] = now
+                author_data['updated_at'] = now
+                
+                success, _ = self.upsert('author', author_data, 'goodreads_id')
+                if not success:
+                    logger.error(f"Failed to update author: {author_id}")
+                    continue
+                
+                # Now get all the author's books
+                books_data = author_books_scraper.scrape_author_books(author_id)
+                if not books_data:
+                    logger.error(f"Failed to scrape books for author: {author_id}")
+                    continue
+                
+                # Import each book
+                for book in books_data['books']:
+                    if not book['goodreads_id']:
+                        continue
+                        
+                    # Create minimal book data for import
+                    # Set source as 'author' so merge_book_data can update appropriately
+                    book_data = {
+                        'goodreads_id': book['goodreads_id'],
+                        'title': book['title'],
+                        'source': 'author'
+                    }
+                    
+                    # Add published date if available
+                    if book.get('published_date'):
+                        book_data['published_date'] = book['published_date']
+                    
+                    if self._import_single_book(book_data):
+                        imported += 1
+                        logger.info(f"Imported book: {book['title']}")
+                    else:
+                        logger.error(f"Failed to import book: {book['title']}")
+                
+                processed += 1
+            
+            return processed, imported
+            
+        except Exception as e:
+            logger.error(f"Error syncing authors: {e}")
+            return 0, 0
+
+    def delete_book(self, goodreads_id: str) -> bool:
+        """Delete a book and its relationships from the database"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("BEGIN")
+                try:
+                    # Get the work_id first
+                    cursor = conn.execute(
+                        "SELECT work_id FROM book WHERE goodreads_id = ?",
+                        (goodreads_id,)
+                    )
+                    result = cursor.fetchone()
+                    if not result:
+                        return False
+                        
+                    work_id = result[0]
+                    
+                    # Delete related records first
+                    conn.execute("DELETE FROM book_author WHERE work_id = ?", (work_id,))
+                    conn.execute("DELETE FROM book_genre WHERE work_id = ?", (work_id,))
+                    conn.execute("DELETE FROM book_series WHERE work_id = ?", (work_id,))
+                    conn.execute("DELETE FROM book_similar WHERE work_id = ? OR similar_work_id = ?", (work_id, work_id))
+                    conn.execute("DELETE FROM library WHERE work_id = ?", (work_id,))
+                    
+                    # Finally delete the book
+                    conn.execute("DELETE FROM book WHERE goodreads_id = ?", (goodreads_id,))
+                    
+                    conn.execute("COMMIT")
+                    return True
+                    
+                except Exception as e:
+                    conn.execute("ROLLBACK")
+                    print(f"Error in transaction: {e}")
+                    return False
+                    
+        except Exception as e:
+            print(f"Error deleting book: {e}")
+            return False
