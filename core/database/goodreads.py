@@ -14,6 +14,7 @@ from core.resolvers.book_resolver import BookResolver
 from ..scrapers.series_scraper import SeriesScraper
 from ..scrapers.author_scraper import AuthorScraper
 from ..scrapers.author_books_scraper import AuthorBooksScraper
+from ..scrapers.similar_scraper import SimilarScraper
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
@@ -115,7 +116,7 @@ class GoodreadsDB(BaseDB):
         if not Path(self.db_path).exists():
             init_db(self.db_path)
     
-    def _import_single_book(self, calibre_data: Dict[str, Any]) -> bool:
+    def _import_single_book(self, calibre_data: Dict[str, Any], conn=None) -> bool:
         """
         Import a single book from any source with full resolution.
         Resolves the book data, then imports the base book data, along with
@@ -126,21 +127,29 @@ class GoodreadsDB(BaseDB):
         that are passed in via calibre_data.
         """
         try:
-            goodreads_id = calibre_data['goodreads_id']
-            resolver = BookResolver(scrape=True)
+            should_close_conn = conn is None
+            if should_close_conn:
+                conn = self._get_connection()
+                conn.execute("BEGIN IMMEDIATE")  # Use IMMEDIATE to prevent locks
             
-            # Resolve the full book data (this will have 'source': 'scrape')
-            final_book_data = resolver.resolve_book(goodreads_id)
-            if not final_book_data:
-                print(f"Failed to resolve a proper edition for book ID: {goodreads_id}")
-                return False
+            try:
+                goodreads_id = calibre_data['goodreads_id']
+                resolver = BookResolver(scrape=True)
+                
+                # Resolve the full book data (this will have 'source': 'scrape')
+                final_book_data = resolver.resolve_book(goodreads_id)
+                if not final_book_data:
+                    print(f"Failed to resolve a proper edition for book ID: {goodreads_id}")
+                    if should_close_conn:
+                        conn.rollback()
+                        conn.close()
+                    return False
 
-            # Update final_book_data with any provided override (e.g. source)
-            if 'source' in calibre_data:
-                final_book_data['source'] = calibre_data['source']         
-            
-            with self._get_connection() as conn:
-                conn.execute("BEGIN")
+                # Update final_book_data with any provided override (e.g. source)
+                if 'source' in calibre_data:
+                    final_book_data['source'] = calibre_data['source']
+                
+                # Import all data within the same transaction
                 try:
                     # Import the base book data using our diff-and-merge logic.
                     if not self._import_base_book_data(conn, final_book_data):
@@ -158,17 +167,31 @@ class GoodreadsDB(BaseDB):
                         raise Exception("Failed to import series")
                     if not self._import_genres(conn, final_book_data['work_id'], final_book_data.get('genres', [])):
                         raise Exception("Failed to import genres")
-                        
-                    conn.execute("COMMIT")
+                    
+                    if should_close_conn:
+                        conn.commit()
+                        conn.close()
                     return True
                     
                 except Exception as e:
-                    conn.execute("ROLLBACK")
+                    if should_close_conn:
+                        conn.rollback()
+                        conn.close()
                     print(f"Transaction failed: {e}")
                     return False
                     
+            except Exception as e:
+                if should_close_conn:
+                    conn.rollback()
+                    conn.close()
+                print(f"Error importing book: {e}")
+                return False
+                
         except Exception as e:
-            print(f"Error importing book: {e}")
+            if conn and should_close_conn:
+                conn.rollback()
+                conn.close()
+            print(f"Error in import process: {e}")
             return False
         
     def _import_base_book_data(self, conn: sqlite3.Connection, new_book_data: Dict[str, Any]) -> bool:
@@ -637,6 +660,100 @@ class GoodreadsDB(BaseDB):
             logger.error(f"Error syncing authors: {e}")
             return 0, 0
 
+    def sync_similar(self, source: str = None, limit: int = None) -> Tuple[int, int]:
+        """
+        For books that do not yet have any similar-book relationships,
+        scrape their similar books (using the book’s goodreads_id) and
+        insert the relationship into the book_similar table.
+
+        Args:
+            source: Optional filter so that only books with a given source
+                    (e.g. "library") are processed.
+            limit: Optional maximum number of books to process.
+
+        Returns:
+            Tuple of (processed_books_count, imported_relationships_count)
+        """
+        processed = 0
+        imported = 0
+
+        # First, retrieve books that have no similar-book entries.
+        try:
+            with self._get_connection() as conn:
+                if source:
+                    sql = ("""
+                        SELECT * FROM book 
+                        WHERE work_id NOT IN (
+                            SELECT DISTINCT work_id FROM book_similar
+                        )
+                        AND source = ?
+                        ORDER BY created_at ASC
+                    """)
+                    cursor = conn.execute(sql, (source,))
+                else:
+                    sql = ("""
+                        SELECT * FROM book 
+                        WHERE work_id NOT IN (
+                            SELECT DISTINCT work_id FROM book_similar
+                        )
+                        ORDER BY created_at ASC
+                    """)
+                    cursor = conn.execute(sql)
+                rows = cursor.fetchall()
+                cols = [col[0] for col in cursor.description]
+                unsynced_books = [dict(zip(cols, row)) for row in rows]
+                if limit:
+                    unsynced_books = unsynced_books[:limit]
+        except Exception as e:
+            print(f"Error retrieving unsynced books: {e}")
+            return 0, 0
+
+        # Initialize the similar scraper.
+        similar_scraper = SimilarScraper(scrape=True)
+
+        for book in unsynced_books:
+            print(f"\nSyncing similar books for: {book['title']} (goodreads_id: {book['goodreads_id']})")
+            # Scrape similar books for the current book.
+            similar_books = similar_scraper.scrape_similar_books(book['work_id'])
+            if not similar_books:
+                print(f" - No similar books found for {book['title']}")
+                processed += 1
+                continue
+
+            for similar in similar_books:
+                # Create minimal similar-book data.
+                similar_data = {
+                    'goodreads_id': similar['goodreads_id'],
+                    'title': similar['title'],
+                    'source': 'similar'
+                }
+                # Import the similar book into the main book table.
+                if self._import_single_book(similar_data):
+                    # After importing, retrieve the similar book record to get its work_id.
+                    similar_record = self.get_by_id('book', similar['goodreads_id'], id_field='goodreads_id')
+                    if not similar_record:
+                        print(f"   -> Could not retrieve imported similar book: {similar['title']}")
+                        continue
+                    similar_work_id = similar_record.get('work_id')
+                    now = datetime.now().isoformat()
+                    # Insert the relationship into the book_similar table.
+                    try:
+                        with self._get_connection() as conn:
+                            conn.execute("""
+                                INSERT INTO book_similar (work_id, similar_work_id, created_at, updated_at)
+                                VALUES (?, ?, ?, ?)
+                                ON CONFLICT(work_id, similar_work_id) DO NOTHING
+                            """, (book['work_id'], similar_work_id, now, now))
+                        imported += 1
+                        print(f"   -> Inserted similar relationship: {book['title']} -> {similar['title']}")
+                    except Exception as e:
+                        print(f"   -> Error inserting similar relationship for {book['title']}: {e}")
+                else:
+                    print(f"   -> Failed to import similar book: {similar['title']}")
+            processed += 1
+
+        return processed, imported
+    
     def delete_book(self, goodreads_id: str) -> bool:
         """Delete a book and its relationships from the database"""
         try:
