@@ -476,22 +476,34 @@ class BookScraper:
         return {}
     
     def _extract_publication_info(self, soup) -> dict:
-        """Extract publication date and state"""
         pub_element = soup.find('p', attrs={'data-testid': 'publicationInfo'})
         if pub_element:
             text = pub_element.text.strip()
             result = {'date': None, 'state': None}
-            
+
+            # Determine the raw date string based on the prefix
             if text.startswith('Expected publication'):
                 result['state'] = 'upcoming'
-                result['date'] = text.replace('Expected publication', '').strip()
+                raw_date = text.replace('Expected publication', '').strip()
             elif text.startswith('First published'):
                 result['state'] = 'published'
-                result['date'] = text.replace('First published', '').strip()
+                raw_date = text.replace('First published', '').strip()
             elif text.startswith('Published'):
                 result['state'] = 'published'
-                result['date'] = text.replace('Published', '').strip()
-                
+                raw_date = text.replace('Published', '').strip()
+            else:
+                raw_date = text
+
+            # Convert the raw date to ISO 8601 format if possible.
+            try:
+                # Adjust the format string if your raw date differs.
+                dt = datetime.strptime(raw_date, "%B %d, %Y")
+                # This produces something like "2021-08-05T00:00:00.000000"
+                result['date'] = dt.isoformat(timespec='microseconds')
+            except Exception as e:
+                # If parsing fails, fall back to the raw string
+                result['date'] = raw_date
+
             return result
         return {}
     
@@ -667,7 +679,7 @@ class EditionsScraper:
     
     def scrape_editions(self, work_id: str) -> list[dict]:
         """
-        Get all editions of a work
+        Get editions from first page of a work
         Returns list of editions with format:
         [
             {
@@ -683,41 +695,25 @@ class EditionsScraper:
         ]
         """
         print(f"Scraping editions for work: {work_id}")
-        editions = []
-        current_page = 1
         
-        while True:
-            # Get page content
-            url = self._get_page_url(work_id, current_page)
-            if not self.downloader.download_url(url):
-                break
-            
-            # Read the downloaded page
-            html = self._read_html(work_id, current_page)
-            if not html:
-                break
-            
-            try:
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # Get editions from this page
-                page_editions = self._extract_editions(soup)
-                editions.extend(page_editions)
-                
-                # Check pagination
-                pagination = self._extract_pagination(soup)
-                print(f"Processing page {pagination['current_page']} of {pagination['total_pages']}")
-                
-                if current_page >= pagination['total_pages']:
-                    break
-                
-                current_page += 1
-                
-            except Exception as e:
-                print(f"Error processing page {current_page}: {e}")
-                break
+        # Get first page content
+        url = self._get_page_url(work_id, 1)
+        if not self.downloader.download_url(url):
+            return []
         
-        return editions
+        # Read the downloaded page
+        html = self._read_html(work_id, 1)
+        if not html:
+            return []
+        
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            editions = self._extract_editions(soup)
+            return editions
+            
+        except Exception as e:
+            print(f"Error processing page: {e}")
+            return []
     
     def _get_page_url(self, work_id: str, page: int) -> str:
         """Get URL for editions page"""
@@ -787,10 +783,13 @@ class EditionsScraper:
                 pub_div = details.find('div', text=re.compile(r'Published|Expected publication'))
                 if pub_div:
                     text = pub_div.text.strip()
-                    # Extract just the date portion
-                    date_match = re.search(r'(?:Published|Expected publication)\s+(.*?)(?:\s+by\s+|$)', text)
+                    # Extract date portion, excluding "by Publisher" text
+                    date_match = re.search(r'(?:Published|Expected publication)\s+(.*?)(?:\s+by\s+.*)?$', text)
                     if date_match:
-                        edition['published_date'] = date_match.group(1).strip()
+                        date_text = date_match.group(1).strip()
+                        # Only set if it looks like a real date (not just "by Publisher")
+                        if not date_text.startswith('by '):
+                            edition['published_date'] = date_text
                 
                 # Get language
                 language_div = details.find('div', text=lambda x: x and 'Edition language:' in x)
@@ -811,41 +810,18 @@ class EditionsScraper:
             # Only add if it meets all criteria:
             # - Has goodreads_id and title
             # - Has pages
+            # - Has valid published date (not just "by Publisher")
             # - Is in English
             # - Has valid format
             if (edition['goodreads_id'] and edition['title'] and 
                 edition['pages'] and
                 edition['published_date'] and
+                not edition['published_date'].startswith('by ') and
                 edition['language'] == 'English' and
                 edition['format'] in valid_formats):
                 editions.append(edition)
         
         return editions
-    
-    def _extract_pagination(self, soup) -> dict:
-        """Extract pagination information"""
-        pagination = {'current_page': 1, 'total_pages': 1}
-        
-        div = soup.find('div', style=lambda x: x and 'text-align: right' in x)
-        if div:
-            current = div.find('em', class_='current')
-            if current:
-                try:
-                    pagination['current_page'] = int(current.text.strip())
-                except ValueError:
-                    pass
-            
-            max_page = 1
-            for link in div.find_all('a'):
-                try:
-                    page_num = int(link.text.strip())
-                    max_page = max(max_page, page_num)
-                except ValueError:
-                    continue
-            
-            pagination['total_pages'] = max(max_page, pagination['current_page'])
-        
-        return pagination
 
 
 # core/scrapers/series_scraper.py
@@ -977,7 +953,7 @@ class SimilarScraper:
     def __init__(self, scrape: bool = False):
         self.downloader = GoodreadsDownloader(scrape)
     
-    def scrape_similar_books(self, book_id: str) -> list[dict]:
+    def scrape_similar_books(self, work_id: str) -> list[dict]:
         """
         Get similar books for a given book
         Returns list of books with format:
@@ -988,16 +964,16 @@ class SimilarScraper:
             }
         ]
         """
-        print(f"Scraping similar books for: {book_id}")
+        print(f"Scraping similar books for: {work_id}")
         
         # Get page content
-        url = self._get_page_url(book_id)
+        url = self._get_page_url(work_id)
         if not self.downloader.download_url(url):
-            print(f"Failed to download similar books page for ID: {book_id}")
+            print(f"Failed to download similar books page for ID: {work_id}")
             return []
             
         # Read the downloaded page
-        html = self._read_html(book_id)
+        html = self._read_html(work_id)
         if not html:
             return []
             
@@ -1009,13 +985,13 @@ class SimilarScraper:
             print(f"Error processing similar books: {e}")
             return []
     
-    def _get_page_url(self, book_id: str) -> str:
+    def _get_page_url(self, work_id: str) -> str:
         """Get URL for similar books page"""
-        return f"https://www.goodreads.com/book/similar/{book_id}"
+        return f"https://www.goodreads.com/book/similar/{work_id}"
     
-    def _read_html(self, book_id: str) -> str:
+    def _read_html(self, work_id: str) -> str:
         """Read downloaded HTML file"""
-        path = Path('data/cache/book/similar') / f"{book_id}.html"
+        path = Path('data/cache/book/similar') / f"{work_id}.html"
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()

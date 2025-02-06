@@ -1,18 +1,22 @@
 +-- cli/
 |   +-- commands/
 |   |-- __init__.py [empty]
-|   |-- author.py [empty]
+|   |-- author.py
 |   |-- book.py [empty]
+|   |-- chain.py
 |   |-- dev.py
+|   |-- genre.py
 |   |-- library.py
 |   |-- scraper.py
-|   |-- series.py [empty]
+|   |-- series.py
+|   |-- similar.py
 |-- __init__.py [empty]
 |-- main.py
 +-- combined_files/
 |-- cli-commands.txt
 |-- cli.txt
 |-- core-database.txt
+|-- core-resolvers.txt
 |-- core-scrapers.txt
 |-- core-utils.txt
 +-- core/
@@ -20,7 +24,10 @@
 |   |-- __init__.py
 |   |-- base.py
 |   |-- goodreads.py
+|   |-- queries.py
 |   |-- schema.py
+|   +-- resolvers/
+|   |-- book_resolver.py
 |   +-- scrapers/
 |   |-- __init__.py [empty]
 |   |-- author_books_scraper.py
@@ -39,6 +46,7 @@
 |   |-- http.py
 |   |-- image.py
 |   |-- rate_limit.py [empty]
+|-- exclusions.py
 +-- data/
 |   +-- cache/
 |   |   +-- author/

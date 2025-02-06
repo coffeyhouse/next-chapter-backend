@@ -1,3 +1,69 @@
+# cli\commands\author.py
+
+import click
+from core.database import GoodreadsDB
+from core.scrapers.author_scraper import AuthorScraper
+from core.scrapers.author_books_scraper import AuthorBooksScraper
+
+@click.group()
+def author():
+    """Author management commands"""
+    pass
+
+@author.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to books database')
+@click.option('--days', default=30, help='Sync authors not updated in this many days')
+@click.option('--limit', default=None, type=int, help='Limit number of authors to sync')
+def sync(db_path: str, days: int, limit: int):
+    """Sync unsynced authors and import their books"""
+    click.echo(f"\nSyncing authors not updated in {days} days")
+    if limit:
+        click.echo(f"Limited to {limit} authors")
+    
+    db = GoodreadsDB(db_path)
+    processed, imported = db.sync_authors(days, limit)
+    
+    click.echo(f"\nProcessed {processed} authors")
+    click.echo(f"Imported {imported} new books")
+
+
+# cli\commands\chain.py
+
+import click
+from core.database import GoodreadsDB
+
+@click.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to the books database')
+@click.option('--calibre-path', default="C:/path/to/calibre/metadata.db", help='Path to Calibre metadata.db')
+@click.option('--limit', default=None, type=int, help='Limit number of books for each operation')
+def chain(db_path: str, calibre_path: str, limit: int):
+    """
+    Chain several CLI operations:
+      1. Import books from the Calibre library.
+      2. Sync similar books (for books with source "library").
+      3. Sync series.
+
+    This command will run the three tasks sequentially.
+    """
+    db = GoodreadsDB(db_path)
+
+    click.echo("\n=== Starting Library Import ===")
+    lib_processed, lib_imported = db.import_calibre_books(calibre_path, limit)
+    click.echo(f"Library Import: Processed {lib_processed} books, Imported {lib_imported} books.\n")
+
+    click.echo("=== Starting Similar Sync ===")
+    sim_processed, sim_imported = db.sync_similar(source="library", limit=limit)
+    click.echo(f"Similar Sync: Processed {sim_processed} books, Imported {sim_imported} similar relationships.\n")
+
+    click.echo("=== Starting Series Sync ===")
+    ser_processed, ser_imported = db.sync_series(limit=limit)
+    click.echo(f"Series Sync: Processed {ser_processed} series, Imported {ser_imported} books from series.\n")
+
+if __name__ == '__main__':
+    chain()
+
+
+
 # cli\commands\dev.py
 
 import click
@@ -143,6 +209,46 @@ def combine(output_dir: str):
         click.echo(click.style(f"\nError combining files: {e}", fg='red'))
 
 
+# cli\commands\genre.py
+
+import click
+from core.database import GoodreadsDB
+from core.database.queries import BookQueries
+
+@click.group()
+def genre():
+    """Genre management commands"""
+    pass
+
+@genre.command(name="list")
+@click.option('--db-path', '--db', default="books.db", help="Path to the books database")
+@click.argument('genre_name')
+def list_books(db_path: str, genre_name: str):
+    """
+    List all books in a specific genre, including Goodreads votes,
+    ordered by votes (highest first).
+
+    GENRE_NAME is the name of the genre to filter books by.
+    """
+    db = GoodreadsDB(db_path)
+    # Instantiate the BookQueries with our DB instance (which provides execute_query)
+    queries = BookQueries(db)
+    books = queries.get_books_by_genre(genre_name)
+    
+    if books:
+        click.echo(f"\nBooks in genre '{genre_name}':")
+        for book in books:
+            votes = book.get('goodreads_votes')
+            votes_str = f"{votes}" if votes is not None else "N/A"
+            click.echo(f" - {book['title']} (Goodreads ID: {book['goodreads_id']}, Votes: {votes_str})")
+    else:
+        click.echo(f"\nNo books found in genre '{genre_name}'.")
+
+if __name__ == '__main__':
+    genre()
+
+
+
 # core/cli/commands/library.py
 import click
 from core.database import GoodreadsDB
@@ -176,6 +282,29 @@ def stats(db_path: str):
     click.echo("\nLibrary Statistics:")
     for table, count in stats.items():
         click.echo(f"{table}: {count} records")
+
+@library.command()
+@click.argument('goodreads_id')
+@click.option('--db-path', '--db', default="books.db", help='Path to books database')
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+def delete(goodreads_id: str, db_path: str, force: bool):
+    """Delete a book and its relationships from the database"""
+    db = GoodreadsDB(db_path)
+    
+    # Get book details first
+    book = db.get_by_id('book', goodreads_id, id_field='goodreads_id')
+    if not book:
+        click.echo(click.style(f"\nNo book found with ID: {goodreads_id}", fg='red'))
+        return
+        
+    # Show confirmation unless force flag is used
+    if not force:
+        click.confirm(f"\nAre you sure you want to delete '{book['title']}'?", abort=True)
+    
+    if db.delete_book(goodreads_id):
+        click.echo(click.style(f"\nSuccessfully deleted '{book['title']}'", fg='green'))
+    else:
+        click.echo(click.style("\nFailed to delete book", fg='red'))
 
 
 # core/cli/commands/scraper.py
@@ -301,4 +430,69 @@ def similar(book_id: str, scrape: bool):
         click.echo(json.dumps(result, indent=2))
     else:
         click.echo(click.style("\nFailed to get similar books data", fg='red'))
+
+
+# cli\commands\series.py
+
+import click
+from core.database import GoodreadsDB
+
+@click.group()
+def series():
+    """Series management commands"""
+    pass
+
+@series.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to books database')
+@click.option('--days', default=30, help='Sync series not updated in this many days')
+@click.option('--limit', default=None, type=int, help='Limit number of series to sync')
+def sync(db_path: str, days: int, limit: int):
+    """Sync unsynced series and import their books"""
+    click.echo(f"\nSyncing series not updated in {days} days")
+    if limit:
+        click.echo(f"Limited to {limit} series")
+    
+    db = GoodreadsDB(db_path)
+    processed, imported = db.sync_series(days, limit)
+    
+    click.echo(f"\nProcessed {processed} series")
+    click.echo(f"Imported {imported} new books")
+
+
+
+# cli/commands/similar.py
+
+import click
+from core.database import GoodreadsDB
+
+@click.group()
+def similar():
+    """Similar books management commands"""
+    pass
+
+@similar.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to the books database')
+@click.option('--source', default=None, help='Filter by source (e.g. "library")')
+@click.option('--limit', default=None, type=int, help='Limit number of books to sync')
+def sync(db_path: str, source: str, limit: int):
+    """
+    Sync similar books for books that do not have any similar-book entries.
+    For each such book (optionally filtered by source), this command will scrape
+    similar books and import the relationships into the database.
+    """
+    click.echo("\nSyncing similar books...")
+    if source:
+        click.echo(f"Filtering by source: {source}")
+    if limit:
+        click.echo(f"Limited to {limit} books")
+
+    db = GoodreadsDB(db_path)
+    processed, imported = db.sync_similar(source, limit)
+
+    click.echo(f"\nProcessed {processed} books")
+    click.echo(f"Imported {imported} similar relationships")
+
+if __name__ == '__main__':
+    similar()
+
 

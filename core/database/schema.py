@@ -1,3 +1,4 @@
+# core/database/schema.py
 from pathlib import Path
 import sqlite3
 

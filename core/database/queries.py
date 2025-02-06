@@ -37,7 +37,7 @@ class BookQueries(BaseQueries):
             JOIN book_genre bg ON b.work_id = bg.work_id
             JOIN genre g ON bg.genre_id = g.id
             WHERE g.name = ?
-            ORDER BY b.goodreads_rating DESC NULLS LAST
+            ORDER BY b.goodreads_votes DESC NULLS LAST
         """
         return self.execute_query(sql, (genre_name,))
 
@@ -68,14 +68,29 @@ class BookQueries(BaseQueries):
         return self.execute_query(sql)
 
 class AuthorQueries(BaseQueries):
-    def get_unsynced_authors(self, days_old: int = 30) -> List[Dict[str, Any]]:
-        sql = """
-            SELECT a.* FROM author a
-            WHERE a.last_synced_at IS NULL
-            OR datetime(a.last_synced_at) < datetime('now', ?)
-            ORDER BY a.last_synced_at ASC NULLS FIRST
-        """
-        return self.execute_query(sql, (f'-{days_old} days',))
+    def get_unsynced_authors(self, days_old: int = 30, source: str = None) -> List[Dict[str, Any]]:
+        if source:
+            sql = """
+                SELECT DISTINCT a.* FROM author a
+                JOIN book_author ba ON a.goodreads_id = ba.author_id
+                JOIN book b ON b.work_id = ba.work_id
+                WHERE ba.role = 'Author'
+                AND b.source = ?
+                AND (a.last_synced_at IS NULL
+                OR datetime(a.last_synced_at) < datetime('now', ?))
+                ORDER BY a.last_synced_at ASC NULLS FIRST
+            """
+            return self.execute_query(sql, (source, f'-{days_old} days'))
+        else:
+            sql = """
+                SELECT DISTINCT a.* FROM author a
+                JOIN book_author ba ON a.goodreads_id = ba.author_id
+                WHERE ba.role = 'Author'
+                AND (a.last_synced_at IS NULL
+                OR datetime(a.last_synced_at) < datetime('now', ?))
+                ORDER BY a.last_synced_at ASC NULLS FIRST
+            """
+            return self.execute_query(sql, (f'-{days_old} days',))
 
     def get_books_by_author(self, author_id: str) -> List[Dict[str, Any]]:
         sql = """
@@ -103,14 +118,26 @@ class AuthorQueries(BaseQueries):
         return self.execute_query(sql, (f'%{query}%',))
 
 class SeriesQueries(BaseQueries):
-    def get_unsynced_series(self, days_old: int = 30) -> List[Dict[str, Any]]:
-        sql = """
-            SELECT s.* FROM series s
-            WHERE s.last_synced_at IS NULL
-            OR datetime(s.last_synced_at) < datetime('now', ?)
-            ORDER BY s.last_synced_at ASC NULLS FIRST
-        """
-        return self.execute_query(sql, (f'-{days_old} days',))
+    def get_unsynced_series(self, days_old: int = 30, source: str = None) -> List[Dict[str, Any]]:
+        if source:
+            sql = """
+                SELECT DISTINCT s.* FROM series s
+                JOIN book_series bs ON s.goodreads_id = bs.series_id
+                JOIN book b ON b.work_id = bs.work_id
+                WHERE b.source = ?
+                AND (s.last_synced_at IS NULL
+                OR datetime(s.last_synced_at) < datetime('now', ?))
+                ORDER BY s.last_synced_at ASC NULLS FIRST
+            """
+            return self.execute_query(sql, (source, f'-{days_old} days'))
+        else:
+            sql = """
+                SELECT s.* FROM series s
+                WHERE s.last_synced_at IS NULL
+                OR datetime(s.last_synced_at) < datetime('now', ?)
+                ORDER BY s.last_synced_at ASC NULLS FIRST
+            """
+            return self.execute_query(sql, (f'-{days_old} days',))
 
     def get_books_in_series(self, series_id: str) -> List[Dict[str, Any]]:
         sql = """

@@ -15,6 +15,8 @@ from ..scrapers.series_scraper import SeriesScraper
 from ..scrapers.author_scraper import AuthorScraper
 from ..scrapers.author_books_scraper import AuthorBooksScraper
 from ..scrapers.similar_scraper import SimilarScraper
+from core.exclusions import should_exclude_book, get_exclusion_reason  # New import for exclusion logging
+
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
@@ -34,11 +36,11 @@ def choose_source(existing_source: str, new_source: Optional[str]) -> str:
     to the existing source, then use the new source. Otherwise, keep the existing one.
     """
     priority = {
-        'library': 3,
-        'series': 2,
-        'author': 2,
-        'similar': 2,
-        'scrape': 1
+        'library': 100,
+        'series': 90,
+        'author': 80,
+        'similar': 70,
+        'scrape': 60
     }
     
     if not new_source:
@@ -144,6 +146,21 @@ class GoodreadsDB(BaseDB):
                         conn.rollback()
                         conn.close()
                     return False
+
+                # --- Check for exclusions and log them ---
+                reason = get_exclusion_reason(final_book_data)
+                if reason:
+                    message = (f"Excluding book '{final_book_data.get('title')}' "
+                               f"(Goodreads ID: {goodreads_id}) due to: {reason}")
+                    print(message)
+                    # Append the exclusion message to a text file.
+                    with open("exclusions.txt", "a", encoding="utf-8") as f:
+                        f.write(message + "\n")
+                    if should_close_conn:
+                        conn.rollback()
+                        conn.close()
+                    return True
+                # ------------------------------------------------
 
                 # Update final_book_data with any provided override (e.g. source)
                 if 'source' in calibre_data:
@@ -499,13 +516,14 @@ class GoodreadsDB(BaseDB):
             print(f"Error importing genres: {e}")
             return False
 
-    def sync_series(self, days_old: int = 30, limit: int = None) -> Tuple[int, int]:
+    def sync_series(self, days_old: int = 30, limit: int = None, source: str = None) -> Tuple[int, int]:
         """
         Sync unsynced series by scraping their pages and importing their books.
         
         Args:
             days_old: Sync series not updated in this many days.
             limit: Maximum number of series to sync.
+            source: Only sync series that have books with this source (e.g. 'library')
             
         Returns:
             A tuple of (processed_count, imported_count).
@@ -513,10 +531,10 @@ class GoodreadsDB(BaseDB):
         try:
             # Get unsynced series.
             series_queries = SeriesQueries(self)
-            unsynced_series = series_queries.get_unsynced_series(days_old)
+            unsynced_series = series_queries.get_unsynced_series(days_old, source)
             
             if not unsynced_series:
-                logger.info("No unsynced series found")
+                logger.info(f"No unsynced series found{' for source: ' + source if source else ''}")
                 return 0, 0
             
             # Apply a limit if specified.
@@ -572,13 +590,14 @@ class GoodreadsDB(BaseDB):
             logger.error(f"Error syncing series: {e}")
             return 0, 0
         
-    def sync_authors(self, days_old: int = 30, limit: int = None) -> Tuple[int, int]:
+    def sync_authors(self, days_old: int = 30, limit: int = None, source: str = None) -> Tuple[int, int]:
         """
         Sync unsynced authors by scraping their pages and importing their books.
         
         Args:
             days_old: Sync authors not updated in this many days
             limit: Maximum number of authors to sync
+            source: Only sync authors who have books with this source (e.g. 'library')
             
         Returns:
             Tuple of (processed_count, imported_count)
@@ -586,10 +605,10 @@ class GoodreadsDB(BaseDB):
         try:
             # Get unsynced authors using our queries class
             author_queries = AuthorQueries(self)
-            unsynced_authors = author_queries.get_unsynced_authors(days_old)
+            unsynced_authors = author_queries.get_unsynced_authors(days_old, source)
             
             if not unsynced_authors:
-                logger.info("No unsynced authors found")
+                logger.info(f"No unsynced authors found{' for source: ' + source if source else ''}")
                 return 0, 0
             
             # Apply limit if specified
@@ -603,56 +622,80 @@ class GoodreadsDB(BaseDB):
             processed = 0
             imported = 0
             
-            for author in unsynced_authors:
-                author_id = author['goodreads_id']
-                logger.info(f"Syncing author: {author['name']} ({author_id})")
+            # Open file for logging skipped books
+            with open("skipped_author_books.txt", "a", encoding="utf-8") as skip_log:
+                skip_log.write(f"\n=== Author Sync Run: {datetime.now().isoformat()} ===\n")
                 
-                # First get the author's updated details
-                author_data = author_scraper.scrape_author(author_id)
-                if not author_data:
-                    logger.error(f"Failed to scrape author: {author_id}")
-                    continue
-                
-                # Update the author record
-                now = datetime.now().isoformat()
-                author_data['last_synced_at'] = now
-                author_data['updated_at'] = now
-                
-                success, _ = self.upsert('author', author_data, 'goodreads_id')
-                if not success:
-                    logger.error(f"Failed to update author: {author_id}")
-                    continue
-                
-                # Now get all the author's books
-                books_data = author_books_scraper.scrape_author_books(author_id)
-                if not books_data:
-                    logger.error(f"Failed to scrape books for author: {author_id}")
-                    continue
-                
-                # Import each book
-                for book in books_data['books']:
-                    if not book['goodreads_id']:
+                for author in unsynced_authors:
+                    author_id = author['goodreads_id']
+                    logger.info(f"Syncing author: {author['name']} ({author_id})")
+                    
+                    # First get the author's updated details
+                    author_data = author_scraper.scrape_author(author_id)
+                    if not author_data:
+                        logger.error(f"Failed to scrape author: {author_id}")
                         continue
+                    
+                    # Update the author record
+                    now = datetime.now().isoformat()
+                    author_data['last_synced_at'] = now
+                    author_data['updated_at'] = now
+                    
+                    success, _ = self.upsert('author', author_data, 'goodreads_id')
+                    if not success:
+                        logger.error(f"Failed to update author: {author_id}")
+                        continue
+                    
+                    # Now get all the author's books
+                    books_data = author_books_scraper.scrape_author_books(author_id)
+                    if not books_data:
+                        logger.error(f"Failed to scrape books for author: {author_id}")
+                        continue
+                    
+                    # Import each book
+                    for book in books_data['books']:
+                        if not book['goodreads_id']:
+                            continue
+                            
+                        # Get full book details to ensure we have proper author roles
+                        book_details = self.book_scraper.scrape_book(book['goodreads_id'])
+                        if not book_details:
+                            logger.error(f"Failed to get full details for book: {book['title']}")
+                            continue
                         
-                    # Create minimal book data for import
-                    # Set source as 'author' so merge_book_data can update appropriately
-                    book_data = {
-                        'goodreads_id': book['goodreads_id'],
-                        'title': book['title'],
-                        'source': 'author'
-                    }
+                        # Check if this author is listed as 'Author' for this book
+                        is_primary_author = False
+                        author_role = None
+                        for book_author in book_details.get('authors', []):
+                            if book_author.get('goodreads_id') == author_id:
+                                author_role = book_author.get('role', '')
+                                if author_role.lower() == 'author':
+                                    is_primary_author = True
+                                break
+                        
+                        if not is_primary_author:
+                            skip_message = (
+                                f"Book: {book['title']} (ID: {book['goodreads_id']})\n"
+                                f"Author: {author['name']} (ID: {author_id})\n"
+                                f"Role: {author_role or 'Unknown'}\n"
+                                f"URL: https://www.goodreads.com/book/show/{book['goodreads_id']}\n"
+                                f"Reason: Not listed as primary Author\n"
+                                f"---\n"
+                            )
+                            skip_log.write(skip_message)
+                            logger.info(f"Skipping book '{book['title']}' as {author['name']} is not listed as primary Author")
+                            continue
+                            
+                        # Use the full book details for import since we have them
+                        book_details['source'] = 'author'
+                        
+                        if self._import_single_book(book_details):
+                            imported += 1
+                            logger.info(f"Imported book: {book['title']}")
+                        else:
+                            logger.error(f"Failed to import book: {book['title']}")
                     
-                    # Add published date if available
-                    if book.get('published_date'):
-                        book_data['published_date'] = book['published_date']
-                    
-                    if self._import_single_book(book_data):
-                        imported += 1
-                        logger.info(f"Imported book: {book['title']}")
-                    else:
-                        logger.error(f"Failed to import book: {book['title']}")
-                
-                processed += 1
+                    processed += 1
             
             return processed, imported
             
@@ -663,7 +706,7 @@ class GoodreadsDB(BaseDB):
     def sync_similar(self, source: str = None, limit: int = None) -> Tuple[int, int]:
         """
         For books that do not yet have any similar-book relationships,
-        scrape their similar books (using the book’s goodreads_id) and
+        scrape their similar books (using the book's work_id) and
         insert the relationship into the book_similar table.
 
         Args:
@@ -783,12 +826,10 @@ class GoodreadsDB(BaseDB):
                     
                     conn.execute("COMMIT")
                     return True
-                    
                 except Exception as e:
                     conn.execute("ROLLBACK")
                     print(f"Error in transaction: {e}")
                     return False
-                    
         except Exception as e:
             print(f"Error deleting book: {e}")
             return False

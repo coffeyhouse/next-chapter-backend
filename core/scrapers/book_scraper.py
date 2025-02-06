@@ -245,7 +245,10 @@ class BookScraper:
             # Get role if specified
             role_span = link.find('span', class_='ContributorLink__role')
             if role_span:
-                author['role'] = role_span.text.strip('()').strip()
+                role = role_span.text.strip('()').strip()
+                # Clean up any remaining parentheses and whitespace
+                role = role.replace('(', '').replace(')', '').strip()
+                author['role'] = role
             
             authors.append(author)
             if goodreads_id:

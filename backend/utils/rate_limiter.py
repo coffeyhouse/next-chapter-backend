@@ -8,9 +8,9 @@ import click
 
 class RateLimiter:
     def __init__(self, 
-                 min_delay: float = 1,
-                 max_delay: float = 5,
-                 burst_size: int = 50,
+                 min_delay: float = 0.2,
+                 max_delay: float = 0.5,
+                 burst_size: int = 10,
                  min_burst_delay: float = 10.0,
                  max_burst_delay: float = 30.0):
         """
