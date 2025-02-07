@@ -5,14 +5,12 @@ from datetime import datetime
 db = SqliteDatabase('books.db')
 
 class BaseModel(Model):
-    # Add common fields that appear in all/most tables
     created_at = DateTimeField(default=datetime.now)
     updated_at = DateTimeField(default=datetime.now)
 
     class Meta:
         database = db
 
-# Main Entities
 class Book(BaseModel):
     goodreads_id = CharField(primary_key=True)
     work_id = CharField(unique=True)
@@ -59,29 +57,41 @@ class Genre(BaseModel):
     class Meta:
         table_name = 'genre'
 
-# Relationship Models
 class BookAuthor(BaseModel):
-    work_id = ForeignKeyField(Book, field='work_id')
-    author_id = ForeignKeyField(Author, field='goodreads_id')
+    book = ForeignKeyField(Book, column_name='work_id', field='work_id')
+    author = ForeignKeyField(Author, column_name='author_id', field='goodreads_id')
     role = CharField(null=True)
 
     class Meta:
         table_name = 'book_author'
-        primary_key = CompositeKey('work_id', 'author_id')
+        primary_key = CompositeKey('book', 'author')
 
 class BookSeries(BaseModel):
-    work_id = ForeignKeyField(Book, field='work_id')
-    series_id = ForeignKeyField(Series, field='goodreads_id')
+    book = ForeignKeyField(Book, column_name='work_id', field='work_id')
+    series = ForeignKeyField(Series, column_name='series_id', field='goodreads_id')
     series_order = FloatField(null=True)
 
     class Meta:
         table_name = 'book_series'
-        primary_key = CompositeKey('work_id', 'series_id')
+        primary_key = CompositeKey('book', 'series')
 
 class BookGenre(BaseModel):
-    work_id = ForeignKeyField(Book, field='work_id')
-    genre_id = ForeignKeyField(Genre, field='id')
+    book = ForeignKeyField(Book, column_name='work_id', field='work_id')
+    genre = ForeignKeyField(Genre, column_name='genre_id', field='id')
 
     class Meta:
         table_name = 'book_genre'
-        primary_key = CompositeKey('work_id', 'genre_id')
+        primary_key = CompositeKey('book', 'genre')
+
+class BookUser(BaseModel):
+    # Define exactly as in database - no ForeignKeyField
+    work_id = CharField()
+    user_id = IntegerField()
+    status = CharField()
+    source = CharField(null=True)
+    started_at = DateTimeField(null=True)
+    finished_at = DateTimeField(null=True)
+
+    class Meta:
+        table_name = 'book_user'
+        primary_key = CompositeKey('work_id', 'user_id')
