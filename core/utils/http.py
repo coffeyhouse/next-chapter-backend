@@ -1,8 +1,8 @@
 import requests
 from pathlib import Path
 from urllib.parse import urlparse
-from backend.utils.proxy.proxy_manager import ProxyManager
-from backend.utils.rate_limiter import RateLimiter
+from utils.proxy.proxy_manager import ProxyManager
+from utils.rate_limit import RateLimiter
 
 class GoodreadsDownloader:
     def __init__(self, scrape=False):

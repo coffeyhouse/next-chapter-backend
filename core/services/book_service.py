@@ -202,3 +202,112 @@ class BookService:
             )
             for book in books
         ]
+
+    async def get_all_books(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        source: Optional[str] = None,
+        sort_by: str = "title",
+        sort_order: str = "asc",
+        user_id: Optional[int] = None
+    ) -> List[BookListItem]:
+        """Get all books with pagination and optional user data"""
+        # Get base book data using the query class
+        books = self.queries.get_all_books(
+            limit=limit,
+            offset=offset,
+            source=source,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            include_library=True
+        )
+        
+        # Return empty list if no books found
+        if not books:
+            return []
+            
+        # Get book IDs for relationship queries
+        book_ids = [book['work_id'] for book in books]
+        
+        # Get authors for all books
+        authors = self.db.execute_query("""
+            SELECT ba.work_id, a.goodreads_id, a.name, ba.role
+            FROM book_author ba
+            JOIN author a ON ba.author_id = a.goodreads_id
+            WHERE ba.work_id IN ({})
+        """.format(','.join('?' * len(book_ids))), book_ids)
+
+        # Group authors by work_id
+        author_map = {}
+        for author in authors:
+            if author['work_id'] not in author_map:
+                author_map[author['work_id']] = []
+            author_map[author['work_id']].append({
+                'goodreads_id': author['goodreads_id'],
+                'name': author['name'],
+                'role': author['role']
+            })
+
+        # Get primary series for all books
+        series = self.db.execute_query("""
+            SELECT bs.work_id, s.goodreads_id, s.title, bs.series_order as "order"
+            FROM book_series bs
+            JOIN series s ON bs.series_id = s.goodreads_id
+            WHERE bs.work_id IN ({})
+            ORDER BY bs.series_order ASC NULLS LAST
+        """.format(','.join('?' * len(book_ids))), book_ids)
+
+        # Create lookup of primary series by work_id
+        series_map = {
+            s['work_id']: {
+                'goodreads_id': s['goodreads_id'],
+                'title': s['title'],
+                'order': s['order']
+            } for s in series
+        }
+
+        # If no user_id, return book data with relationships but no user-specific data
+        if not user_id:
+            return [
+                BookListItem(
+                    **book,
+                    authors=author_map.get(book['work_id'], []),
+                    series=series_map.get(book['work_id']),
+                    reading_status=ReadingStatus.NONE,
+                    is_wanted=False,
+                    is_in_library=bool(book.get('calibre_id'))
+                )
+                for book in books
+            ]
+
+        # Get user data for these books
+        user_data = self.db.execute_query("""
+            SELECT work_id, status, wanted
+            FROM book_user
+            WHERE work_id IN ({})
+            AND user_id = ?
+        """.format(','.join('?' * len(book_ids))), (*book_ids, user_id))
+
+        # Create lookup of user data by work_id
+        user_data_map = {
+            d['work_id']: {
+                'status': d['status'],
+                'wanted': d['wanted']
+            } for d in user_data
+        }
+
+        # Combine all data into BookListItem models
+        return [
+            BookListItem(
+                **book,
+                authors=author_map.get(book['work_id'], []),
+                series=series_map.get(book['work_id']),
+                reading_status=ReadingStatus(
+                    user_data_map.get(book['work_id'], {}).get('status', 'none')
+                ),
+                is_wanted=user_data_map.get(book['work_id'], {}).get('wanted', False),
+                is_in_library=bool(book.get('calibre_id'))
+            )
+            for book in books
+        ]

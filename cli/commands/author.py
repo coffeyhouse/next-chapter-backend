@@ -1,7 +1,5 @@
 import click
 from core.database import GoodreadsDB
-from core.scrapers.author_scraper import AuthorScraper
-from core.scrapers.author_books_scraper import AuthorBooksScraper
 
 @click.group()
 def author():

@@ -11,6 +11,68 @@ class BaseQueries:
         self.execute_query = executor.execute_query
 
 class BookQueries(BaseQueries):
+    def get_all_books(
+        self, 
+        limit: int = 50, 
+        offset: int = 0, 
+        source: str = None,
+        sort_by: str = "title",
+        sort_order: str = "asc",
+        include_library: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all books with flexible filtering and sorting options.
+        
+        Args:
+            limit: Maximum number of books to return
+            offset: Number of books to skip
+            source: Filter by source (e.g. 'library', 'author', etc.)
+            sort_by: Field to sort by ('title', 'published_date', 'goodreads_rating', 'goodreads_votes')
+            sort_order: Sort direction ('asc' or 'desc')
+            include_library: Whether to include library data (calibre_id, etc.)
+            
+        Returns:
+            List of book records
+        """
+        # Validate sort parameters
+        valid_sort_fields = {
+            'title': 'b.title',
+            'published_date': 'b.published_date',
+            'goodreads_rating': 'b.goodreads_rating',
+            'goodreads_votes': 'b.goodreads_votes',
+            'created_at': 'b.created_at'
+        }
+        sort_field = valid_sort_fields.get(sort_by, 'b.title')
+        sort_direction = 'DESC' if sort_order.lower() == 'desc' else 'ASC'
+        
+        # Build the base query
+        if include_library:
+            base_query = """
+                SELECT b.*, l.calibre_id 
+                FROM book b
+                LEFT JOIN library l ON b.goodreads_id = l.goodreads_id
+            """
+        else:
+            base_query = "SELECT b.* FROM book b"
+        
+        # Add source filter if specified
+        where_clause = ""
+        params = []
+        if source:
+            where_clause = "WHERE b.source = ?"
+            params.append(source)
+        
+        # Add sorting and pagination
+        query = f"""
+            {base_query}
+            {where_clause}
+            ORDER BY {sort_field} {sort_direction} NULLS LAST
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        
+        return self.execute_query(query, tuple(params))
+
     def get_unsynced_books(self, days_old: int = 30) -> List[Dict[str, Any]]:
         sql = """
             SELECT b.* FROM book b

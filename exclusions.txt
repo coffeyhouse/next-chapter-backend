@@ -1,0 +1,381 @@
+Excluding book 'James Penney's New Identity / Guy Walks Into a Bar' (Goodreads ID: 17431406) due to: title contains disallowed pattern ' / '
+Excluding book 'James Penney's New Identity / Guy Walks Into a Bar' (Goodreads ID: 17431406) due to: title contains disallowed pattern ' / '
+Excluding book 'Theodore Boone box set #1-3' (Goodreads ID: 17707459) due to: title contains disallowed pattern 'box set'
+Excluding book 'The Millennium Trilogy' (Goodreads ID: 7822895) due to: title contains disallowed pattern 'trilogy'
+Excluding book 'The Wolf Hotel: Boxed Set' (Goodreads ID: 60532423) due to: title contains disallowed pattern 'boxed'
+Excluding book 'The Beartown Trilogy Ebook Collection: Beartown, Us Against You, The Winners' (Goodreads ID: 60785594) due to: title contains disallowed pattern 'trilogy'
+Excluding book 'A Good Girl's Guide to Murder Complete Series Paperback Boxed Set: A Good Girl's Guide to Murder; Good Girl, Bad Blood; As Good as Dead' (Goodreads ID: 58699913) due to: title contains disallowed pattern 'boxed'
+Excluding book 'Holly Jackson Collection 4 Books Set: A Good Girl's Guide to Murder; Good Girl, Bad Blood; As Good as Dead, Kill Joy' (Goodreads ID: 139009861) due to: title contains disallowed pattern 'books set'
+Excluding book 'The Thursday Murder Club / The Man Who Died Twice / The Bullet That Missed' (Goodreads ID: 181554489) due to: title contains disallowed pattern ' / '
+Excluding book 'The Thursday Murder Club / The Man Who Died Twice / The Bullet That Missed / The Last Devil To Die' (Goodreads ID: 199263546) due to: title contains disallowed pattern ' / '
+Excluding book 'The Housemaid / The Housemaid's Secret' (Goodreads ID: 204783862) due to: title contains disallowed pattern ' / '
+Excluding book 'The Empyrean Series 3 Book Set' (Goodreads ID: 217916565) due to: votes (93) are below the minimum threshold of 100.
+Excluding book 'Cheshire Crossing' (Goodreads ID: 42420039) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Adventure of the Dishonor Among Thieves' (Goodreads ID: 27164327) due to: votes (51) are below the minimum threshold of 100.
+Excluding book 'The Adventure of the Unscrupulous Assassin' (Goodreads ID: 27164353) due to: votes (39) are below the minimum threshold of 100.
+Excluding book 'The Adventure of the Sealed Room' (Goodreads ID: 27164362) due to: votes (56) are below the minimum threshold of 100.
+Excluding book 'The Chef' (Goodreads ID: 23785125) due to: description is missing.
+Excluding book 'GURPS Casey & Andy' (Goodreads ID: 25313226) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'The Magical Fantastical Fridge' (Goodreads ID: 25716668) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Mickey Bolitar Series 1 - 3 Set' (Goodreads ID: 29003054) due to: title contains number pattern indicating multiple books
+Excluding book 'The Myron Bolitar Series 7-Book Bundle: Deal Breaker, Drop Shot, Fade Away, Back Spin, One False Move, The Final Detail, Darkest Fear' (Goodreads ID: 17162535) due to: title contains disallowed pattern ' bundle'
+Excluding book 'YA Thrillers from Adult Bestsellers: Harlan Coben, Elizabeth George, John Grisham, and Kathy & Brenden Reichs' (Goodreads ID: 16692570) due to: votes (39) are below the minimum threshold of 100.
+Excluding book 'The Myron Bolitar Collection: 9 Great Novels' (Goodreads ID: 19189558) due to: title contains disallowed pattern 'novels'
+Excluding book 'Promise Me / No Second Chance / Just One Look' (Goodreads ID: 11468023) due to: title contains disallowed pattern ' / '
+Excluding book 'Fade Away / Back Spin' (Goodreads ID: 11253452) due to: title contains disallowed pattern ' / '
+Excluding book 'Just One Look / The Innocent / Promise Me' (Goodreads ID: 3331336) due to: title contains disallowed pattern ' / '
+Excluding book 'Back Spin / One False Move / No Second Chance' (Goodreads ID: 581726) due to: title contains disallowed pattern ' / '
+Excluding book 'Tell No One / Gone For Good / Darkest Fear' (Goodreads ID: 382688) due to: title contains disallowed pattern ' / '
+Excluding book 'Tell No One / Back Spin' (Goodreads ID: 382687) due to: title contains disallowed pattern ' / '
+Excluding book 'Crimetime' (Goodreads ID: 13084470) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Tell No One / Gone For Good' (Goodreads ID: 2245961) due to: title contains disallowed pattern ' / '
+Excluding book 'Deal Breaker / Drop Shot / Fade Away' (Goodreads ID: 372386) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Today's Best Fiction: The Rosie Project, Six Years, Oath of Office, The Maresille Caper' (Goodreads ID: 26028895) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'Suspense Magazine April 2012' (Goodreads ID: 19502787) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Suspense Magazine, June 2010' (Goodreads ID: 10302490) due to: votes (11) are below the minimum threshold of 100.
+Excluding book 'Pulp Fiction: The Crimefighters' (Goodreads ID: 8063603) due to: votes (59) are below the minimum threshold of 100.
+Excluding book 'Delia Owens in Africa: A Life in the Wild' (Goodreads ID: 52663812) due to: votes (85) are below the minimum threshold of 100.
+Excluding book 'Knighted' (Goodreads ID: 59365930) due to: votes (75) are below the minimum threshold of 100.
+Excluding book 'Batman: The Dark Knight #20' (Goodreads ID: 19630665) due to: votes (22) are below the minimum threshold of 100.
+Excluding book 'Batman: The Dark Knight #24' (Goodreads ID: 20177339) due to: votes (27) are below the minimum threshold of 100.
+Excluding book 'Penguin: Pain and Prejudice' (Goodreads ID: 13518673) due to: genre 'Comics' is disallowed.
+Excluding book 'The Punisher, Vol. 6' (Goodreads ID: 10060484) due to: genre 'Comics' is disallowed.
+Excluding book 'Vengeance of the Moon Knight, Vol. 1: Shock and Awe' (Goodreads ID: 7326169) due to: genre 'Comics' is disallowed.
+Excluding book 'Wolverine: Flies to a Spider' (Goodreads ID: 6009739) due to: genre 'Comics' is disallowed.
+Excluding book 'Foolkiller MAX: White Angels' (Goodreads ID: 5456069) due to: votes (54) are below the minimum threshold of 100.
+Excluding book 'The Punisher, Vol. 11: Girls in White Dresses' (Goodreads ID: 5812896) due to: genre 'Comics' is disallowed.
+Excluding book 'Wolverine: Dangerous Games' (Goodreads ID: 4184983) due to: genre 'Comics' is disallowed.
+Excluding book 'Foolkiller MAX: Fool's Paradise' (Goodreads ID: 3130597) due to: votes (74) are below the minimum threshold of 100.
+Excluding book 'Detective Comics (2011-2016) #27' (Goodreads ID: 19862996) due to: genre 'Comics' is disallowed.
+Excluding book 'Elizabeth's Canvas' (Goodreads ID: 17398875) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Moon Knight by Huston, Benson & Hurwitz Omnibus' (Goodreads ID: 58684434) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Punisher: Frank Castle #75' (Goodreads ID: 26036923) due to: votes (20) are below the minimum threshold of 100.
+Excluding book 'A Book on the Table:  Flash Fiction' (Goodreads ID: 39987393) due to: votes (86) are below the minimum threshold of 100.
+Excluding book 'Juan Gómez-Jurado Collection: The Moses Expedition and The Traitor's Emblem' (Goodreads ID: 13546310) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'Ugly Love / Maybe Someday / Maybe Not' (Goodreads ID: 25402412) due to: title contains disallowed pattern ' / '
+Excluding book 'Atria Books: A Booklovers Sampler' (Goodreads ID: 18070971) due to: title contains disallowed pattern 'sampler'
+Excluding book 'Just a Touch: The Atria Indie Author 2014 Sampler' (Goodreads ID: 22914398) due to: title contains disallowed pattern 'sampler'
+Excluding book 'The Atria Indie Lovers Collection: Twisted Perfection / Losing Hope / Red Hill' (Goodreads ID: 18705949) due to: title contains disallowed pattern ' / '
+Excluding book 'Changeling: A Memoir Of Parents Lost And Found' (Goodreads ID: 8712342) due to: votes (40) are below the minimum threshold of 100.
+Excluding book 'Cake' (Goodreads ID: 1943025) due to: votes (62) are below the minimum threshold of 100.
+Excluding book 'Long Live The King Anthology' (Goodreads ID: 53862436) due to: title contains disallowed pattern 'anthology'
+Excluding book 'North Star Shifters The Complete Series' (Goodreads ID: 29213123) due to: votes (54) are below the minimum threshold of 100.
+Excluding book 'Midnight Menage' (Goodreads ID: 28942852) due to: votes (37) are below the minimum threshold of 100.
+Excluding book 'Shifters & Soulmates' (Goodreads ID: 26185080) due to: votes (75) are below the minimum threshold of 100.
+Excluding book 'Forests & Fate' (Goodreads ID: 25839034) due to: votes (35) are below the minimum threshold of 100.
+Excluding book 'Grizzlies & Glaciers' (Goodreads ID: 25822707) due to: votes (81) are below the minimum threshold of 100.
+Excluding book 'Mrs. Colson Rides the Cowboys' (Goodreads ID: 23257539) due to: votes (4) are below the minimum threshold of 100.
+Excluding book 'Overtime' (Goodreads ID: 23610068) due to: votes (45) are below the minimum threshold of 100.
+Excluding book 'Unhistorical: Poems' (Goodreads ID: 41393224) due to: votes (30) are below the minimum threshold of 100.
+Excluding book 'No Girls No Telephones' (Goodreads ID: 22978702) due to: votes (20) are below the minimum threshold of 100.
+Excluding book 'The Truth Pixie' (Goodreads ID: 41443051) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Christmas Gift Set: A Boy Called Christmas, The Girl Who Saved Christmas, Father Christmas and Me' (Goodreads ID: 37554017) due to: votes (54) are below the minimum threshold of 100.
+Excluding book 'The Novels of Gillian Flynn: Sharp Objects, Dark Places' (Goodreads ID: 15784966) due to: title contains disallowed pattern 'novels'
+Excluding book 'Sally Rooney Bestselling 2 Books Set: Conversations with Friends, Normal People' (Goodreads ID: 49014714) due to: title contains disallowed pattern 'books set'
+Excluding book 'I May Be Wrong / Normal People / How Emotions Are Made / Heaven is for Real' (Goodreads ID: 107210710) due to: title contains disallowed pattern ' / '
+Excluding book 'Oct. 26 Figure Four Weekly: Comparing WWE and UFC live events, Brock vs. Taker, more' (Goodreads ID: 21080694) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Aug. 31 2010 Figure Four Weekly: Bios of Bourne, Luna, six others, UFC 118, Mania plans, tons more' (Goodreads ID: 18879276) due to: votes could not be determined.
+Excluding book 'June 16, 2009 Figure Four Weekly: Mitsuharu Misawa's life and death, bio, UFC 99 recap, WWE turmoil, Trump buys Raw, more' (Goodreads ID: 21964913) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'The A-Z of Pointless: A brain-teasing bumper book of questions and trivia' (Goodreads ID: 31568139) due to: votes (86) are below the minimum threshold of 100.
+Excluding book 'The Book of Training by Colonel Hap Thompson of Roanoke, VA, 1843: Annotated From the Library of John C. Calhoun' (Goodreads ID: 40957844) due to: votes (73) are below the minimum threshold of 100.
+Excluding book 'Trout's Lie' (Goodreads ID: 24998658) due to: votes (22) are below the minimum threshold of 100.
+Excluding book 'The Literary Review: Loss Control' (Goodreads ID: 25283061) due to: votes (2) are below the minimum threshold of 100.
+Excluding book 'Swimming Swimmers Swimming' (Goodreads ID: 10074609) due to: votes (22) are below the minimum threshold of 100.
+Excluding book 'Abstraktion und Einfühlung: Poems' (Goodreads ID: 6080672) due to: votes (22) are below the minimum threshold of 100.
+Excluding book 're:f' (Goodreads ID: 368898) due to: votes (24) are below the minimum threshold of 100.
+Excluding book 'Fiction International 34: Madness II' (Goodreads ID: 911027) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Grand Canyon, Inc.' (Goodreads ID: 368906) due to: votes (69) are below the minimum threshold of 100.
+Excluding book 'The Body of Martin Aguilera' (Goodreads ID: 18210662) due to: votes (92) are below the minimum threshold of 100.
+Excluding book 'Frenzy' (Goodreads ID: 368901) due to: votes (69) are below the minimum threshold of 100.
+Excluding book 'Big Picture' (Goodreads ID: 368902) due to: votes (87) are below the minimum threshold of 100.
+Excluding book 'The One that Got Away' (Goodreads ID: 368911) due to: votes (27) are below the minimum threshold of 100.
+Excluding book 'For Her Dark Skin' (Goodreads ID: 368909) due to: votes (95) are below the minimum threshold of 100.
+Excluding book 'Zulus' (Goodreads ID: 368908) due to: votes (61) are below the minimum threshold of 100.
+Excluding book 'The Weather and Women Treat Me Fair' (Goodreads ID: 368910) due to: votes (69) are below the minimum threshold of 100.
+Excluding book 'Someone's Uncle: A Story' (Goodreads ID: 12442017) due to: votes (77) are below the minimum threshold of 100.
+Excluding book 'Two Scorched Men' (Goodreads ID: 222802842) due to: votes (31) are below the minimum threshold of 100.
+Excluding book 'The Complete Angel Catbird' (Goodreads ID: 38811625) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Martians Claim Canada' (Goodreads ID: 36896535) due to: votes (51) are below the minimum threshold of 100.
+Excluding book 'Angel Catbird, Volume 3: The Catbird Roars' (Goodreads ID: 32661744) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Angel Catbird, Volume 2: To Castle Catula' (Goodreads ID: 31386637) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'An Improvisation on the Theme of Rights' (Goodreads ID: 57631739) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Angel Catbird, Vol. 1' (Goodreads ID: 28146168) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Dire Cartographies: The Roads to Ustopia and The Handmaid's Tale' (Goodreads ID: 26025378) due to: votes (56) are below the minimum threshold of 100.
+Excluding book 'The Freeze-Dried Groom' (Goodreads ID: 23315031) due to: votes (25) are below the minimum threshold of 100.
+Excluding book 'Seeking Its Own Level: Motif Volume 4' (Goodreads ID: 22529979) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'The MaddAddam Trilogy: Oryx and Crake / The Year of the Flood / MaddAddam' (Goodreads ID: 18594761) due to: title contains disallowed pattern ' / '
+Excluding book 'I Dream of Zenia with the Bright Red Teeth' (Goodreads ID: 15699794) due to: description is missing.
+Excluding book 'This Is a Photograph of Me: Girl and Horse, 1928' (Goodreads ID: 14901861) due to: votes (25) are below the minimum threshold of 100.
+Excluding book 'Waltzing Again: New & Selected Conversations with Margaret Atwood' (Goodreads ID: 72580) due to: votes (55) are below the minimum threshold of 100.
+Excluding book 'Bashful Bob and Doleful Dorinda' (Goodreads ID: 1312325) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Selected Poems: 1966-1984' (Goodreads ID: 336767) due to: votes (73) are below the minimum threshold of 100.
+Excluding book 'Rude Ramsay and the Roaring Radishes' (Goodreads ID: 1051265) due to: genre 'Picture Books' is disallowed.
+Excluding book 'War Bears' (Goodreads ID: 40584747) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Margaret Atwood Omnibus: Wilderness Tips & Cat's Eye' (Goodreads ID: 1546755) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Two Solicitudes: Conversations' (Goodreads ID: 533295) due to: votes (21) are below the minimum threshold of 100.
+Excluding book 'The Cayman Islands: The Beach and Beyond' (Goodreads ID: 3168858) due to: votes could not be determined.
+Excluding book 'Princess Prunella and the Purple Peanut' (Goodreads ID: 72598) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Polarities. Selected Stories' (Goodreads ID: 2241746) due to: votes (10) are below the minimum threshold of 100.
+Excluding book 'Life Before Man ; Cat's Eye' (Goodreads ID: 72583) due to: votes (36) are below the minimum threshold of 100.
+Excluding book 'For the Birds' (Goodreads ID: 5009660) due to: votes (28) are below the minimum threshold of 100.
+Excluding book 'Barbed Lyres: Canadian Venomous Verse' (Goodreads ID: 6707288) due to: votes (12) are below the minimum threshold of 100.
+Excluding book 'Surfacing/Life Before Man/The Handmaid's Tale' (Goodreads ID: 6260845) due to: votes (60) are below the minimum threshold of 100.
+Excluding book 'The Canlit Foodbook' (Goodreads ID: 1133655) due to: votes (20) are below the minimum threshold of 100.
+Excluding book 'Women writers' (Goodreads ID: 52286664) due to: votes (4) are below the minimum threshold of 100.
+Excluding book 'Interlunar' (Goodreads ID: 1537569) due to: description is missing.
+Excluding book 'Ontario: A Bicentennial Tribute' (Goodreads ID: 7129267) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Second Words: Selected Critical Prose' (Goodreads ID: 859547) due to: votes (60) are below the minimum threshold of 100.
+Excluding book 'Anna's Pet' (Goodreads ID: 3150160) due to: votes (25) are below the minimum threshold of 100.
+Excluding book 'Days of the rebels: 1815-1840' (Goodreads ID: 2452593) due to: votes (7) are below the minimum threshold of 100.
+Excluding book 'Siren Song' (Goodreads ID: 24780210) due to: votes (38) are below the minimum threshold of 100.
+Excluding book 'The Animals in That Country' (Goodreads ID: 1286848) due to: description is missing.
+Excluding book 'The Handmaid's Tale: The Graphic Novel' (Goodreads ID: 40766383) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'First Light: A celebration of Alan Garner' (Goodreads ID: 59997185) due to: votes (52) are below the minimum threshold of 100.
+Excluding book 'Imaginarium 4: The Best Canadian Speculative Writing' (Goodreads ID: 30244026) due to: votes (27) are below the minimum threshold of 100.
+Excluding book 'I Found It at the Movies: An Anthology of Film Poems (6)' (Goodreads ID: 21928817) due to: title contains disallowed pattern 'anthology'
+Excluding book 'Standing Down: From Warrior to Civilian' (Goodreads ID: 24456940) due to: votes (13) are below the minimum threshold of 100.
+Excluding book 'PEN America Issue 16: Teachers' (Goodreads ID: 21256986) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Pen America: A Journal for Writers and Readers: 14 The Good Books' (Goodreads ID: 11549725) due to: votes (17) are below the minimum threshold of 100.
+Excluding book 'A Short History of Myth / The Penelopiad / Weight / Dream Angus' (Goodreads ID: 52256) due to: title contains disallowed pattern ' / '
+Excluding book 'PEN America Issue 7: World Voices' (Goodreads ID: 22750037) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'Three Rivers: The Yukon's Great Boreal Wilderness' (Goodreads ID: 431879) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Bookclub in a Box Discusses the Novel Oryx and Crake' (Goodreads ID: 4420981) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'Turn of the Story: Canadian Short Fiction on the Eve of the Millennium' (Goodreads ID: 4759350) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'The Ark in the Garden: Fables for Our Times' (Goodreads ID: 4357163) due to: votes (4) are below the minimum threshold of 100.
+Excluding book 'Seeing in the Dark: Margaret Atwood's Cat's Eye' (Goodreads ID: 72635) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'The Stationmaster' (Goodreads ID: 31282713) due to: genre 'Manga' is disallowed.
+Excluding book 'Feminism and the Postmodern Impulse: Post-World War II Fiction' (Goodreads ID: 111267) due to: votes (6) are below the minimum threshold of 100.
+Excluding book 'The Selected Gwendolyn MacEwen' (Goodreads ID: 431885) due to: votes (33) are below the minimum threshold of 100.
+Excluding book 'Collecting Clues: Margaret Atwood's Bodily Harm (28)' (Goodreads ID: 381048) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Ploughshares Winter 1993-94 Guest-Edited by Russell Banks and Chase Twichell' (Goodreads ID: 24485196) due to: votes (2) are below the minimum threshold of 100.
+Excluding book 'Recruit or Die: How Any Business Can Beat the Big Guys in the War for YoungTalent' (Goodreads ID: 1675513) due to: votes (40) are below the minimum threshold of 100.
+Excluding book 'Respire: Episode 7' (Goodreads ID: 24737202) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Respire: Episode 8' (Goodreads ID: 24737198) due to: votes (4) are below the minimum threshold of 100.
+Excluding book 'Respire: Episode 6' (Goodreads ID: 24698544) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'Respire: Episode 5' (Goodreads ID: 24698543) due to: votes (7) are below the minimum threshold of 100.
+Excluding book 'Sixty Days, the Box Set' (Goodreads ID: 51931051) due to: title contains disallowed pattern 'box set'
+Excluding book 'Christmas Daddies: A special edition Christmas box set' (Goodreads ID: 37562322) due to: title contains disallowed pattern 'box set'
+Excluding book 'Plaything' (Goodreads ID: 32759243) due to: votes (29) are below the minimum threshold of 100.
+Excluding book 'Bang Gang / Sugar Daddies / Teach Me Dirty' (Goodreads ID: 32854813) due to: title contains disallowed pattern ' / '
+Excluding book 'Dirty Bad Box Set' (Goodreads ID: 27837253) due to: title contains disallowed pattern 'box set'
+Excluding book 'Heartless' (Goodreads ID: 142394230) due to: votes could not be determined.
+Excluding book 'Lords of Darkness: The Complete Duet' (Goodreads ID: 78818597) due to: votes (28) are below the minimum threshold of 100.
+Excluding book 'Greythorn: The Complete Set' (Goodreads ID: 62024942) due to: votes (40) are below the minimum threshold of 100.
+Excluding book 'Dirty Doctor' (Goodreads ID: 59063808) due to: votes (66) are below the minimum threshold of 100.
+Excluding book 'Sinners' (Goodreads ID: 54377894) due to: votes (55) are below the minimum threshold of 100.
+Excluding book 'Ruthless Royals: The Completed Duet' (Goodreads ID: 59707078) due to: votes (60) are below the minimum threshold of 100.
+Excluding book 'Monsters' (Goodreads ID: 60131715) due to: votes (85) are below the minimum threshold of 100.
+Excluding book 'Fall in Love' (Goodreads ID: 55938420) due to: votes (29) are below the minimum threshold of 100.
+Excluding book 'The Redemption' (Goodreads ID: 25674172) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'In Search of Yesterday: Episode Four' (Goodreads ID: 25298245) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'In Search of Yesterday: Episode Three' (Goodreads ID: 25247846) due to: votes (7) are below the minimum threshold of 100.
+Excluding book 'In Search of Yesterday: Episode Two' (Goodreads ID: 25199458) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'In Search of Yesterday: Episode One' (Goodreads ID: 25128113) due to: votes (22) are below the minimum threshold of 100.
+Excluding book 'The Foretelling' (Goodreads ID: 25674138) due to: votes (17) are below the minimum threshold of 100.
+Excluding book 'Begin Again' (Goodreads ID: 24719868) due to: votes (2) are below the minimum threshold of 100.
+Excluding book 'Crimebits: 100 Opening Gambits for Great Thrillers & Linked Mystery Puzzles' (Goodreads ID: 210278551) due to: votes (7) are below the minimum threshold of 100.
+Excluding book 'The Midnight Line / The Address / Another Man's Ground / And All the Phases of the Moon' (Goodreads ID: 40604450) due to: title contains disallowed pattern ' / '
+Excluding book 'Night School / The Bookshop on the Corner / Among the Wicked / One True Loves' (Goodreads ID: 34595734) due to: title contains disallowed pattern ' / '
+Excluding book 'The Essential Jack Reacher: Volume 1: Persuader, The Enemy, One Shot, The Hard Way, Bad Luck and Trouble, Nothing to Lose, Gone Tomorrow' (Goodreads ID: 25809754) due to: page count (2528) exceeds maximum limit of 1800
+Excluding book 'The Essential Jack Reacher: Volume 2: 61 Hours, Worth Dying For, The Affair, A Wanted Man, Never Go Back, Personal' (Goodreads ID: 25809755) due to: page count (2416) exceeds maximum limit of 1800
+Excluding book 'Personal ; You knew me when ; The monogram murders ; Star gazing' (Goodreads ID: 25223425) due to: votes (9) are below the minimum threshold of 100.
+Excluding book 'The Essential Jack Reacher 12-Book Bundle' (Goodreads ID: 22598809) due to: title contains disallowed pattern ' bundle'
+Excluding book 'The Essential Jack Reacher: Persuader, The Enemy, One Shot, The Hard Way, Bad Luck and Trouble, Nothing to Lose, Gone Tomorrow, 61 Hours, Worth Dying For, The Affair' (Goodreads ID: 15796853) due to: page count (5104) exceeds maximum limit of 1800
+Excluding book 'James Penney's New Identity / Guy Walks Into a Bar' (Goodreads ID: 17431406) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Select Editions, Volume 313: 61 Hours / Small Change / Nowhere to Run / Leaving Unknown' (Goodreads ID: 10322669) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Select Editions, Volume 254: Running Blind / Dream Country / Shattered / A Certain Slant of Light' (Goodreads ID: 12198556) due to: title contains disallowed pattern ' / '
+Excluding book 'Lee Child's Jack Reacher Books 1-6: With Prose Translations' (Goodreads ID: 9897851) due to: title contains number pattern indicating multiple books
+Excluding book 'Jack Reacher Omnibus: Killing Floor Die Trying' (Goodreads ID: 6249464) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Crimespree Magazine #52' (Goodreads ID: 21012274) due to: votes (3) are below the minimum threshold of 100.
+Excluding book 'Dick Francis's Bloodline / The View from Here / A Wanted Man / Miss Dreamsville' (Goodreads ID: 17970436) due to: title contains disallowed pattern ' / '
+Excluding book 'The Playboy Interview: Men of Letters' (Goodreads ID: 19214835) due to: votes (28) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions: The Orchard / Worth Dying For / How to Bake a Perfect Life / On Borrowed Time' (Goodreads ID: 13118090) due to: title contains disallowed pattern ' / '
+Excluding book 'The Penguin Book of Crime Stories, Vol. 2' (Goodreads ID: 19058325) due to: votes (15) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions 2010 - 61 Hours, The Wish List, The Lock Artist, The Winter Ghosts' (Goodreads ID: 17788990) due to: votes (18) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions, Volume 292, 2007 #4: Autumn Blue / Bad Luck and Trouble / Tallgrass / Winter's Child' (Goodreads ID: 13722948) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Select Editions: Jacquot And The Angel / The Hard Way / The Undomestic Goddess / False Impression' (Goodreads ID: 12758903) due to: title contains disallowed pattern ' / '
+Excluding book 'Without Fail/Gallows Thief/Head over Heels in the Dales/Valhalla Rising' (Goodreads ID: 2296984) due to: votes (35) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions, Volume 258, 2001 #6: Summer Light / Echo Burning / The Rich Part of Life / On the Street Where You Live' (Goodreads ID: 10231829) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Condensed Books 1999 - The Sands Of Sakkara, The Snow Falcon, Tripwire, Donor' (Goodreads ID: 17748505) due to: title contains number pattern indicating multiple books
+Excluding book 'Reader's Digest Condensed Books 1997: Five Past Midnight / Only Love / Killing Floor / The Shadowy Horses' (Goodreads ID: 17743399) due to: title contains disallowed pattern ' / '
+Excluding book 'Theodore Boone box set #1-3' (Goodreads ID: 17707459) due to: title contains disallowed pattern 'box set'
+Excluding book 'The King of Torts / The Last Juror' (Goodreads ID: 361465) due to: title contains disallowed pattern ' / '
+Excluding book 'The Brethren / A Painted House' (Goodreads ID: 209597) due to: title contains disallowed pattern ' / '
+Excluding book 'The Brethren / The Summons' (Goodreads ID: 5362) due to: title contains disallowed pattern ' / '
+Excluding book 'The Brethren / The Chamber' (Goodreads ID: 3342075) due to: title contains disallowed pattern ' / '
+Excluding book 'The Firm / The Pelican Brief' (Goodreads ID: 35038) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Condensed Books, Volume 1: 1995: The Chamber/Remember Me/The Intruders/The Acorn Winter' (Goodreads ID: 15724371) due to: votes (11) are below the minimum threshold of 100.
+Excluding book 'The Firm / The Appeal / The Chamber' (Goodreads ID: 9988056) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Condensed Books 1993: Client / Sweet Water / Slow Through Eden / Longest Road' (Goodreads ID: 25759435) due to: title contains disallowed pattern ' / '
+Excluding book 'The Client / The Street Lawyer' (Goodreads ID: 142759) due to: title contains disallowed pattern ' / '
+Excluding book 'YA Thrillers from Adult Bestsellers: Harlan Coben, Elizabeth George, John Grisham, and Kathy & Brenden Reichs' (Goodreads ID: 16692570) due to: votes (39) are below the minimum threshold of 100.
+Excluding book 'The Broker / Sam's Letters to Jennifer / Blood Memory / Mosaic' (Goodreads ID: 26857022) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Select Editions: The Last Juror/ The Various Haunts of Men/ The Codex/ The Curious Incident of the Dog in the Night-Time' (Goodreads ID: 23860174) due to: votes (10) are below the minimum threshold of 100.
+Excluding book 'The King of Torts' (Goodreads ID: 12239639) due to: votes (13) are below the minimum threshold of 100.
+Excluding book 'The Brethren' (Goodreads ID: 1146461) due to: votes (97) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions, Volume 238, 1998 #4: The Street Lawyer / The Cobra Event / Sooner or Later / Message in a Bottle' (Goodreads ID: 10887574) due to: title contains disallowed pattern ' / '
+Excluding book 'The Partner' (Goodreads ID: 1053987) due to: votes (88) are below the minimum threshold of 100.
+Excluding book 'Reader's Digest Select Editions, Volume 233, 1997 #5: The Partner / Medusa's Child / All God's Children / Only Son' (Goodreads ID: 16046034) due to: title contains disallowed pattern ' / '
+Excluding book 'Reader's Digest Condensed Books:  Icon / Runaway Jury / Critical Judgment / Capitol Offense' (Goodreads ID: 23444307) due to: title contains disallowed pattern ' / '
+Excluding book 'The Chamber' (Goodreads ID: 2436758) due to: votes (25) are below the minimum threshold of 100.
+Excluding book 'Readers Digest Best Sellers. The Pelican Brief / Every Living Thing' (Goodreads ID: 18739461) due to: title contains disallowed pattern ' / '
+Excluding book 'Condensed Books Volume 5 1992: The Pelican Brief / Treasures / The Island Harp / Eye Of The Storm' (Goodreads ID: 25906000) due to: title contains disallowed pattern ' / '
+Excluding book 'Gabrielle Zevin eBook Sampler' (Goodreads ID: 15794737) due to: title contains disallowed pattern 'sampler'
+Excluding book 'The Complete Poppy War Trilogy: The Poppy War / The Dragon Republic/ The Burning God' (Goodreads ID: 59987058) due to: title contains disallowed pattern ' / '
+Excluding book 'There's a Bear in Your Book' (Goodreads ID: 60625850) due to: genre 'Picture Books' is disallowed.
+Excluding book 'There's a Unicorn in Your Book' (Goodreads ID: 57873521) due to: genre 'Picture Books' is disallowed.
+Excluding book 'There's a Witch in Your Book' (Goodreads ID: 49375503) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Theres A Superhero In Your Book' (Goodreads ID: 49375504) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Spectacular Space' (Goodreads ID: 56491417) due to: votes (13) are below the minimum threshold of 100.
+Excluding book 'There's an Elf in Your Book' (Goodreads ID: 51014564) due to: genre 'Picture Books' is disallowed.
+Excluding book 'There’s an Alien in Your Book' (Goodreads ID: 41221612) due to: genre 'Picture Books' is disallowed.
+Excluding book 'There's a Dragon in Your Book' (Goodreads ID: 36643495) due to: genre 'Picture Books' is disallowed.
+Excluding book 'There's a Monster in Your Book' (Goodreads ID: 34230867) due to: genre 'Picture Books' is disallowed.
+Excluding book 'The Dinosaur That Pooped The Bed' (Goodreads ID: 25828946) due to: genre 'Picture Books' is disallowed.
+Excluding book 'The Dinosaur that Pooped a Lot!' (Goodreads ID: 23346931) due to: description is missing.
+Excluding book 'The Dinosaur that Pooped the Past' (Goodreads ID: 21449820) due to: genre 'Picture Books' is disallowed.
+Excluding book 'The Dinosaur that Pooped a Planet!' (Goodreads ID: 17612880) due to: genre 'Picture Books' is disallowed.
+Excluding book 'The Dinosaur that Pooped Christmas' (Goodreads ID: 15748663) due to: genre 'Picture Books' is disallowed.
+Excluding book 'WOW! 366: Speedy Stories in Just 366 Words' (Goodreads ID: 2953631) due to: votes (49) are below the minimum threshold of 100.
+Excluding book 'The Fae Games Box Set' (Goodreads ID: 57526334) due to: title contains disallowed pattern 'box set'
+Excluding book 'Midnight's End' (Goodreads ID: 57524191) due to: votes (51) are below the minimum threshold of 100.
+Excluding book 'Beneath the Crimson Cloak' (Goodreads ID: 50954431) due to: votes (18) are below the minimum threshold of 100.
+Excluding book 'The Fae Games Duet' (Goodreads ID: 42153090) due to: votes (17) are below the minimum threshold of 100.
+Excluding book 'Dr. Stanton Box Set' (Goodreads ID: 50765003) due to: title contains disallowed pattern 'box set'
+Excluding book 'Stanton Series Box Set' (Goodreads ID: 29245774) due to: title contains disallowed pattern 'box set'
+Excluding book 'A Face in the Crowd / The Longest December' (Goodreads ID: 60102274) due to: title contains disallowed pattern ' / '
+Excluding book 'The Gwendy Collection: Gwendy's Button Box / Gwendy's Magic Feather / Gwendy's Final Task' (Goodreads ID: 60321051) due to: title contains disallowed pattern ' / '
+Excluding book 'Squad D' (Goodreads ID: 15014920) due to: votes (79) are below the minimum threshold of 100.
+Excluding book 'Stephen King Box Set: Mr. Mercedes, Everything's Eventual, Lisey's Story' (Goodreads ID: 26240988) due to: title contains disallowed pattern 'box set'
+Excluding book 'Vertigo Essentials: American Vampire #1' (Goodreads ID: 23670499) due to: votes (26) are below the minimum threshold of 100.
+Excluding book 'Cavalier Archive Volume 1' (Goodreads ID: 16085392) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'The Secretary of Dreams, Volume Two' (Goodreads ID: 7204621) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Under the Dome' (Goodreads ID: 86496091) due to: votes (69) are below the minimum threshold of 100.
+Excluding book 'The Talisman, Road of Trials Issue Zero' (Goodreads ID: 42935698) due to: votes could not be determined.
+Excluding book 'Yellow Morning' (Goodreads ID: 10664554) due to: votes (34) are below the minimum threshold of 100.
+Excluding book 'The Master of Fear: Cell, The Girl Who Loved Tom Gordon, Cujo' (Goodreads ID: 25321966) due to: votes (12) are below the minimum threshold of 100.
+Excluding book 'The Talisman (Volume 1): The Road of Trials' (Goodreads ID: 6907672) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Dark Tower - End World Almanac' (Goodreads ID: 22823060) due to: votes (21) are below the minimum threshold of 100.
+Excluding book 'N' (Goodreads ID: 60306137) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'The Secretary of Dreams, Volume One' (Goodreads ID: 11565) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Dark Tower Series: Books 1-7' (Goodreads ID: 12274389) due to: title contains number pattern indicating multiple books
+Excluding book 'The Things They Left Behind / The Ransome Women' (Goodreads ID: 15830574) due to: title contains disallowed pattern ' / '
+Excluding book 'Illusions in the Rainbow' (Goodreads ID: 23374184) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Cone Head' (Goodreads ID: 13144325) due to: votes (36) are below the minimum threshold of 100.
+Excluding book 'Omnibus: Skeleton Crew / Different Seasons' (Goodreads ID: 847668) due to: title contains disallowed pattern ' / '
+Excluding book 'On Impact' (Goodreads ID: 13599929) due to: votes (28) are below the minimum threshold of 100.
+Excluding book 'The Stephen King Collective' (Goodreads ID: 11878499) due to: votes (67) are below the minimum threshold of 100.
+Excluding book 'Omnibus 2: The Eyes of the Dragon / Firestarter' (Goodreads ID: 2718727) due to: title contains disallowed pattern ' / '
+Excluding book 'The New Lieutenant's Rap' (Goodreads ID: 18179449) due to: votes (28) are below the minimum threshold of 100.
+Excluding book 'The Little Sisters of Eluria' (Goodreads ID: 6356190) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Private Or Public? A Taxonomy of Optimal Ownership and Management Regimes' (Goodreads ID: 13112932) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Desperation / The Regulators: Box Set' (Goodreads ID: 32715) due to: title contains disallowed pattern ' / '
+Excluding book 'Proceedings of the 1995 Professional Case Conference' (Goodreads ID: 155661) due to: votes (1) are below the minimum threshold of 100.
+Excluding book 'Selected from Carrie' (Goodreads ID: 155653) due to: votes (11) are below the minimum threshold of 100.
+Excluding book 'The Dark Tower #1-3' (Goodreads ID: 458450) due to: title contains number pattern indicating multiple books
+Excluding book 'Stephen King Boxed Set' (Goodreads ID: 7758093) due to: title contains disallowed pattern 'boxed'
+Excluding book 'Stephen King 5 3' (Goodreads ID: 15359496) due to: votes (17) are below the minimum threshold of 100.
+Excluding book 'Carrie / The Tommyknockers' (Goodreads ID: 848441) due to: title contains disallowed pattern ' / '
+Excluding book 'Cycle of the Werewolf' (Goodreads ID: 550844) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'পেট সেমেটারি' (Goodreads ID: 58538818) due to: votes (15) are below the minimum threshold of 100.
+Excluding book 'Carrie / 'Salem's Lot / The Shining' (Goodreads ID: 5417) due to: title contains disallowed pattern ' / '
+Excluding book 'The King Family and the Wicked Witch' (Goodreads ID: 52212623) due to: votes (19) are below the minimum threshold of 100.
+Excluding book 'The Shining / Carrie / Misery' (Goodreads ID: 920670) due to: title contains disallowed pattern ' / '
+Excluding book 'The Blue Air Compressor' (Goodreads ID: 52212508) due to: votes (68) are below the minimum threshold of 100.
+Excluding book 'The Dark Man' (Goodreads ID: 17925150) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Killer' (Goodreads ID: 27423274) due to: votes (44) are below the minimum threshold of 100.
+Excluding book 'Never Look Behind You' (Goodreads ID: 27423143) due to: votes (46) are below the minimum threshold of 100.
+Excluding book 'The Cursed Expedition' (Goodreads ID: 27423175) due to: votes (43) are below the minimum threshold of 100.
+Excluding book 'The Hotel at the End of the Road' (Goodreads ID: 27423203) due to: votes (60) are below the minimum threshold of 100.
+Excluding book 'The Other Side of the Fog' (Goodreads ID: 27423231) due to: votes (42) are below the minimum threshold of 100.
+Excluding book 'Qualia Nous: Vol. 2' (Goodreads ID: 199386948) due to: votes (24) are below the minimum threshold of 100.
+Excluding book 'One of Us: A Tribute to Frank Michaels Errington' (Goodreads ID: 55951821) due to: votes (16) are below the minimum threshold of 100.
+Excluding book 'Stephen King's The Dark Tower: The Drawing of the Three: The Complete Graphic Novel Series' (Goodreads ID: 101145441) due to: votes (65) are below the minimum threshold of 100.
+Excluding book 'Sleeping Beauties, Vol. 1' (Goodreads ID: 52656491) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Dark Tides' (Goodreads ID: 50738037) due to: votes (45) are below the minimum threshold of 100.
+Excluding book 'Detours' (Goodreads ID: 24506559) due to: votes (59) are below the minimum threshold of 100.
+Excluding book 'Ploughshares Summer 2017 Issue Guest-Edited by Stewart O'Nan' (Goodreads ID: 35842707) due to: votes (29) are below the minimum threshold of 100.
+Excluding book 'The Prisoner' (Goodreads ID: 48887317) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Cemetery Dance Magazine, Issue 72' (Goodreads ID: 24818767) due to: votes (10) are below the minimum threshold of 100.
+Excluding book 'Dark Tower: The Gunslinger Omnibus' (Goodreads ID: 101145416) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Qualia Nous' (Goodreads ID: 23156614) due to: votes (45) are below the minimum threshold of 100.
+Excluding book 'The Dark Tower: The Gunslinger - So Fell Lord Perth #1' (Goodreads ID: 22083980) due to: genre 'Comics' is disallowed.
+Excluding book 'Road Rage' (Goodreads ID: 14540073) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Road Rage #2' (Goodreads ID: 25485724) due to: votes (16) are below the minimum threshold of 100.
+Excluding book 'Road Rage #1' (Goodreads ID: 24064545) due to: votes (25) are below the minimum threshold of 100.
+Excluding book 'American Vampire, Vol. 3' (Goodreads ID: 18302419) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Bachman Books / Thinner' (Goodreads ID: 6613916) due to: title contains disallowed pattern ' / '
+Excluding book 'King of Bangor' (Goodreads ID: 12117794) due to: votes (13) are below the minimum threshold of 100.
+Excluding book 'American Vampire, Vol. 2' (Goodreads ID: 12827094) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Chronicles of Harris Burdick: Fourteen Amazing Authors Tell the Tales' (Goodreads ID: 18769107) due to: genre 'Picture Books' is disallowed.
+Excluding book 'American Vampire, Vol. 1' (Goodreads ID: 7619398) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Lightspeed Magazine, October 2010' (Goodreads ID: 9669706) due to: votes (35) are below the minimum threshold of 100.
+Excluding book 'American Vampire #5' (Goodreads ID: 142335365) due to: votes (59) are below the minimum threshold of 100.
+Excluding book 'The Stand: Soul Survivors' (Goodreads ID: 10230395) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Dark Tower: The Sorcerer #1' (Goodreads ID: 20047894) due to: genre 'Comics' is disallowed.
+Excluding book 'The Stand: American Nightmares' (Goodreads ID: 6730644) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'He Is Legend: An Anthology Celebrating Richard Matheson' (Goodreads ID: 3547312) due to: title contains disallowed pattern 'anthology'
+Excluding book 'The Hundred-Year Christmas - Signed Slipcased Illustrated Edition' (Goodreads ID: 6777695) due to: votes (53) are below the minimum threshold of 100.
+Excluding book 'The Stand: Captain Trips #3' (Goodreads ID: 21842502) due to: votes (60) are below the minimum threshold of 100.
+Excluding book 'The Stand: Captain Trips #2' (Goodreads ID: 21842501) due to: votes (66) are below the minimum threshold of 100.
+Excluding book 'The Dark Tower: Treachery #1' (Goodreads ID: 30950301) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Stand: Captain Trips #1' (Goodreads ID: 22447865) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Principles of Microeconomics' (Goodreads ID: 40951127) due to: votes (6) are below the minimum threshold of 100.
+Excluding book '2005 Overlook Connection Press Catalog and Fiction Sampler' (Goodreads ID: 5134201) due to: title contains disallowed pattern 'sampler'
+Excluding book 'Horror Plum'd: International Stephen King Bibliography And Guide 1960-2000' (Goodreads ID: 2466184) due to: votes (15) are below the minimum threshold of 100.
+Excluding book 'Legacies' (Goodreads ID: 12273702) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'Misery' (Goodreads ID: 843484) due to: votes (53) are below the minimum threshold of 100.
+Excluding book 'They're Here... Invasion of the Body Snatchers' (Goodreads ID: 7010182) due to: votes (32) are below the minimum threshold of 100.
+Excluding book 'The Best of Cemetery Dance. Volume 1 & 2 Omnibus' (Goodreads ID: 5972873) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Master's Choice' (Goodreads ID: 1130618) due to: votes (83) are below the minimum threshold of 100.
+Excluding book 'Screamplays' (Goodreads ID: 6676150) due to: votes (35) are below the minimum threshold of 100.
+Excluding book 'Blood Lines: Vampire Stories from New England' (Goodreads ID: 500057) due to: votes (44) are below the minimum threshold of 100.
+Excluding book 'Dancing with the Dark: True Encounters with the Paranormal by Masters of the Macabre' (Goodreads ID: 21999) due to: votes (66) are below the minimum threshold of 100.
+Excluding book 'Stephen King and Richard Bachman Giftset' (Goodreads ID: 2766281) due to: votes (8) are below the minimum threshold of 100.
+Excluding book 'Heading Home - Growing Up In Baseball' (Goodreads ID: 155432) due to: votes (6) are below the minimum threshold of 100.
+Excluding book 'Space Movies: Classic Science Fiction Films' (Goodreads ID: 1629559) due to: votes (43) are below the minimum threshold of 100.
+Excluding book 'Mid-life Confidential: The Rock Bottom Remainders Tour America with Three Chords and an Attitude' (Goodreads ID: 173546) due to: votes (94) are below the minimum threshold of 100.
+Excluding book 'Gauntlet: Exploring the Limits of Free Expression - Stephen King Special - Vol. 2' (Goodreads ID: 2315952) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'The 30th Pan Book of Horror Stories' (Goodreads ID: 2932026) due to: votes (16) are below the minimum threshold of 100.
+Excluding book 'The Year's Best Horror Stories XVI' (Goodreads ID: 36545791) due to: votes (44) are below the minimum threshold of 100.
+Excluding book 'The Year's Best Horror IX' (Goodreads ID: 17934029) due to: votes (85) are below the minimum threshold of 100.
+Excluding book 'Fantasy Annual 4' (Goodreads ID: 19537159) due to: votes (15) are below the minimum threshold of 100.
+Excluding book 'The Year's Finest Fantasy 2' (Goodreads ID: 1852862) due to: votes (33) are below the minimum threshold of 100.
+Excluding book 'More Tales of Unknown Horror' (Goodreads ID: 6342970) due to: votes (12) are below the minimum threshold of 100.
+Excluding book 'The Year's Best Horror Stories: Series VI' (Goodreads ID: 5713913) due to: votes (58) are below the minimum threshold of 100.
+Excluding book 'The Magazine of Fantasy and Science Fiction, February 1978' (Goodreads ID: 17346611) due to: votes (5) are below the minimum threshold of 100.
+Excluding book 'The Girl Who Played with Fire: Part 2' (Goodreads ID: 23487829) due to: genre 'Comics' is disallowed.
+Excluding book 'Stieg Larsson's The Girl Who Played with Fire: A Graphic Novel' (Goodreads ID: 24467994) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Girl Who Played With Fire: Part 1' (Goodreads ID: 22533369) due to: genre 'Comics' is disallowed.
+Excluding book 'The Girl with the Dragon Tattoo: Part 2' (Goodreads ID: 22533396) due to: genre 'Comics' is disallowed.
+Excluding book 'Stieg Larsson's The Girl with the Dragon Tattoo: A Graphic Novel, Book 2' (Goodreads ID: 18376573) due to: title contains number pattern indicating multiple books
+Excluding book 'Stieg Larsson's The Girl with the Dragon Tattoo: A Graphic Novel, Book 1' (Goodreads ID: 16240546) due to: title contains number pattern indicating multiple books
+Excluding book 'The Millennium Trilogy' (Goodreads ID: 7822895) due to: title contains disallowed pattern 'trilogy'
+Excluding book 'The Wayward Pines Trilogy Series 3 Books Set' (Goodreads ID: 25217852) due to: title contains disallowed pattern 'trilogy'
+Excluding book 'Six in the Cylinder' (Goodreads ID: 10169845) due to: votes (76) are below the minimum threshold of 100.
+Excluding book 'Wool Omnibus' (Goodreads ID: 13453029) due to: title contains disallowed pattern 'omnibus'
+Excluding book 'Dating You / Hating You' (Goodreads ID: 32620304) due to: title contains disallowed pattern ' / '
+Excluding book 'Be Ready When the Luck Happens' (Goodreads ID: 209192698) due to: genre 'Cookbooks' is disallowed.
+Excluding book 'The Handmaid's Tale: The Graphic Novel' (Goodreads ID: 40766383) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'Gabriel Fallen' (Goodreads ID: 219339791) due to: description is missing.
+Excluding book 'Gabriel Fallen' (Goodreads ID: 219339791) due to: description is missing.
+Excluding book 'Blade, Vol. 2: Evil Against Evil' (Goodreads ID: 210499048) due to: genre 'Comics' is disallowed.
+Excluding book 'Star Wars: Darth Vader, Vol. 9: Rise of the Schism Imperial' (Goodreads ID: 210499036) due to: genre 'Comics' is disallowed.
+Excluding book 'The Jack Reacher Cases (Complete Books #19, #20 & #21)' (Goodreads ID: 209115832) due to: votes (50) are below the minimum threshold of 100.
+Excluding book 'Fort Buzzard' (Goodreads ID: 202741005) due to: description is missing.
+Excluding book 'Make Me: by Lee Child a Jack Reacher Novel | Short Reads Summary' (Goodreads ID: 27245554) due to: votes (62) are below the minimum threshold of 100.
+Excluding book 'Fallout' (Goodreads ID: 24399467) due to: votes (19) are below the minimum threshold of 100.
+Excluding book 'It's a Book' (Goodreads ID: 7747422) due to: genre 'Picture Books' is disallowed.
+Excluding book 'Hot Mess' (Goodreads ID: 205788239) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'The Art of Brevity: Crafting the Very Short Story' (Goodreads ID: 65070907) due to: votes (98) are below the minimum threshold of 100.
+Excluding book 'Irma and Jerry' (Goodreads ID: 1774754) due to: votes (42) are below the minimum threshold of 100.
+Excluding book 'Five Days in Paris: A Novel' (Goodreads ID: 216960029) due to: votes (51) are below the minimum threshold of 100.
+Excluding book 'Hot Mess' (Goodreads ID: 205788239) due to: genre 'Graphic Novels' is disallowed.
+Excluding book 'HARD FALL' (Goodreads ID: 43117532) due to: votes (58) are below the minimum threshold of 100.
+Excluding book 'Scorched Earth' (Goodreads ID: 217199374) due to: votes (84) are below the minimum threshold of 100.
+Excluding book 'Cordially Invited' (Goodreads ID: 38720955) due to: genre 'Cookbooks' is disallowed.
+Excluding book 'The Good, the Bard and the Ugly: A funny, modern take on Shakespeare's best-known plays from the Bafta-winning Horrible Histories writer' (Goodreads ID: 136003031) due to: votes (26) are below the minimum threshold of 100.
+Excluding book 'Gabriel Fallen' (Goodreads ID: 219339791) due to: description is missing.
+Excluding book 'Mr. Aster: Billionaires Club Book 8' (Goodreads ID: 209264785) due to: title contains number pattern indicating multiple books
+Excluding book 'Make Me: by Lee Child a Jack Reacher Novel | Short Reads Summary' (Goodreads ID: 27245554) due to: votes (62) are below the minimum threshold of 100.
+Excluding book 'Wool Omnibus' (Goodreads ID: 13453029) due to: title contains disallowed pattern 'omnibus'

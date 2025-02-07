@@ -68,3 +68,26 @@ async def search_books(
     Includes user-specific data if user_id provided.
     """
     return await book_service.search_books(query, user_id)
+
+@router.get("/", response_model=List[BookListItem])
+async def get_all_books(
+    limit: int = Query(50, ge=1, le=100, description="Number of books to return"),
+    offset: int = Query(0, ge=0, description="Number of books to skip"),
+    source: Optional[str] = Query(None, description="Filter by source (e.g. 'library')"),
+    sort_by: str = Query("title", description="Field to sort by"),
+    sort_order: str = Query("asc", description="Sort direction ('asc' or 'desc')"),
+    user_id: Optional[int] = Query(None, description="Optional user ID for personalized data"),
+    book_service: BookService = Depends(get_book_service)
+):
+    """
+    Get all books with pagination, sorting, and filtering options.
+    Includes user-specific data if user_id is provided.
+    """
+    return await book_service.get_all_books(
+        limit=limit,
+        offset=offset,
+        source=source,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        user_id=user_id
+    )
