@@ -1,4 +1,4 @@
-# core/sqlalchemy/repositories/author.py
+# core/sa/repositories/author.py
 from typing import Optional, List
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import desc, func

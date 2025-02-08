@@ -1,4 +1,4 @@
-# core/sqlalchemy/models/__init__.py
+# core/sa/models/__init__.py
 from .base import Base, TimestampMixin
 from .book import Book, book_author, book_genre, book_similar
 from .author import Author

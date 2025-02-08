@@ -1,9 +1,9 @@
-# tests/sqlalchemy/test_repositories/test_book_repository.py
+# tests/test_sa/test_repositories/test_book_repository.py
 import pytest
 from datetime import datetime
 from sqlalchemy import select
-from core.sqlalchemy.repositories import BookRepository
-from core.sqlalchemy.models import Book, Author, Genre, Series
+from core.sa.repositories import BookRepository
+from core.sa.models import Book, Author, Genre, Series
 
 @pytest.fixture
 def book_repo(db_session):

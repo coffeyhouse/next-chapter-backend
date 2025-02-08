@@ -1,9 +1,9 @@
-# tests/sqlalchemy/test_repositories/test_author_repository.py
+# tests/test_sa/test_repositories/test_author_repository.py
 import pytest
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import func
-from core.sqlalchemy.repositories.author import AuthorRepository
-from core.sqlalchemy.models import Author, Book
+from core.sa.repositories.author import AuthorRepository
+from core.sa.models import Author, Book
 
 @pytest.fixture
 def author_repo(db_session):

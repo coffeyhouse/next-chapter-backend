@@ -1,6 +1,6 @@
-# tests/sqlalchemy/test_models.py
+# tests/test_sa/test_models.py
 import pytest
-from core.sqlalchemy.models import Book, Author, Genre, Series
+from core.sa.models import Book, Author, Genre, Series
 
 def test_book_model_exists(db_session):
     """Test that we can query the book table"""

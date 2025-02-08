@@ -1,4 +1,4 @@
-# core/sqlalchemy/models/user.py
+# core/sa/models/user.py
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Table, DateTime
 from sqlalchemy.orm import relationship
 from .base import Base, TimestampMixin

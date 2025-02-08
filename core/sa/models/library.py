@@ -1,4 +1,4 @@
-# core/sqlalchemy/models/library.py
+# core/sa/models/library.py
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from .base import Base, TimestampMixin

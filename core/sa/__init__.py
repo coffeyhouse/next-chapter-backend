@@ -1,4 +1,4 @@
-# core/sqlalchemy/__init__.py
+# core/sa/__init__.py
 from .database import Database
 from .models import (
     Base, Book, Author, Series, Genre,

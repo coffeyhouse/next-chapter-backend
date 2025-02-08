@@ -1,4 +1,4 @@
-# tests/sqlalchemy/README.md
+# tests/test_sa/README.md
 # SQLAlchemy Integration Tests
 
 These tests verify that SQLAlchemy can correctly:
@@ -10,12 +10,12 @@ These tests verify that SQLAlchemy can correctly:
 
 From the project root:
 ```bash
-pytest tests/sqlalchemy
+pytest tests/test_sa
 ```
 
 To see SQL queries:
 ```bash
-pytest tests/sqlalchemy -s --log-cli-level=DEBUG
+pytest tests/test_sa -s --log-cli-level=DEBUG
 ```
 
 ## Test Structure

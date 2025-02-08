@@ -1,4 +1,4 @@
-# core/sqlalchemy/models/genre.py
+# core/sa/models/genre.py
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime

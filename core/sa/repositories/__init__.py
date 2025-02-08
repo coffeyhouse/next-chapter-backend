@@ -1,4 +1,4 @@
-# core/sqlalchemy/repositories/__init__.py
+# core/sa/repositories/__init__.py
 from .book import BookRepository
 from .author import AuthorRepository
 

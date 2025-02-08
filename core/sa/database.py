@@ -1,4 +1,4 @@
-# core/sqlalchemy/database.py
+# core/sa/database.py
 from contextlib import contextmanager
 from typing import Iterator, Optional
 from sqlalchemy import create_engine
