@@ -1,16 +1,15 @@
 # core/sa/models/series.py
-from sqlalchemy import Column, String, Float, ForeignKey, Table
+from sqlalchemy import Column, String, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from .base import Base, TimestampMixin
 
-# Association table for books in series
-book_series = Table(
-    'book_series',
-    Base.metadata,
-    Column('work_id', String, ForeignKey('book.work_id'), primary_key=True),
-    Column('series_id', String, ForeignKey('series.goodreads_id'), primary_key=True),
-    Column('series_order', Float)
-)
+class BookSeries(Base, TimestampMixin):
+    """Association model for books in series"""
+    __tablename__ = 'book_series'
+
+    work_id = Column(String, ForeignKey('book.work_id'), primary_key=True)
+    series_id = Column(String, ForeignKey('series.goodreads_id'), primary_key=True)
+    series_order = Column(Float)
 
 class Series(Base, TimestampMixin):
     __tablename__ = 'series'
@@ -19,4 +18,4 @@ class Series(Base, TimestampMixin):
     title = Column(String, nullable=False)
 
     # Relationships
-    books = relationship('Book', secondary=book_series, back_populates='series')
+    books = relationship('Book', secondary='book_series', back_populates='series')

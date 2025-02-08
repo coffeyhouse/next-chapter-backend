@@ -1,3 +1,12 @@
++-- .pytest_cache/
+|   +-- v/
+|   |   +-- cache/
+|   |   |-- lastfailed
+|   |   |-- nodeids
+|   |   |-- stepwise
+|-- .gitignore
+|-- CACHEDIR.TAG
+|-- README.md
 +-- api/
 |   +-- routes/
 |   |-- books.py
@@ -24,11 +33,16 @@
 |-- core-database.txt
 |-- core-models.txt
 |-- core-resolvers.txt
+|-- core-sa-models.txt
+|-- core-sa-repositories.txt
+|-- core-sa.txt
 |-- core-scrapers.txt
 |-- core-services.txt
 |-- core-utils-proxy.txt
 |-- core-utils.txt
 |-- core.txt
+|-- tests-test_sa-test_repositories.txt
+|-- tests-test_sa.txt
 +-- core/
 |   +-- database/
 |   |-- __init__.py
@@ -41,6 +55,22 @@
 |   |-- book.py
 |   +-- resolvers/
 |   |-- book_resolver.py
+|   +-- sa/
+|   |   +-- models/
+|   |   |-- __init__.py
+|   |   |-- author.py
+|   |   |-- base.py
+|   |   |-- book.py
+|   |   |-- genre.py
+|   |   |-- library.py
+|   |   |-- series.py
+|   |   |-- user.py
+|   |   +-- repositories/
+|   |   |-- __init__.py
+|   |   |-- author.py
+|   |   |-- book.py
+|   |-- __init__.py
+|   |-- database.py
 |   +-- scrapers/
 |   |-- __init__.py [empty]
 |   |-- author_books_scraper.py
@@ -54,20 +84,6 @@
 |   |-- author_service.py [empty]
 |   |-- book_service.py
 |   |-- series_service.py [empty]
-|   +-- sqlalchemy/
-|   |   +-- models/
-|   |   |-- __init__.py
-|   |   |-- author.py
-|   |   |-- base.py
-|   |   |-- book.py
-|   |   |-- genre.py
-|   |   |-- library.py
-|   |   |-- series.py
-|   |   |-- user.py
-|   |   +-- repositories/
-|   |   |-- test_repo.py
-|   |-- __init__.py
-|   |-- database.py
 |   +-- utils/
 |   |   +-- proxy/
 |   |   |-- proxy_manager.py
@@ -97,9 +113,13 @@
 |   |   +-- author/
 |   |   +-- book/
 +-- tests/
-|   +-- sqlalchemy/
+|   +-- test_sa/
 |   |   +-- test_repositories/
+|   |   |-- test_author_repository.py
 |   |   |-- test_book_repository.py
 |   |-- README.md
+|   |-- __init__.py
 |   |-- conftest.py
 |   |-- test_models.py
+|   |-- test_schema.py
+|   |-- utils.py

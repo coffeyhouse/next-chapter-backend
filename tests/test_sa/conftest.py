@@ -3,6 +3,7 @@ import os
 import sys
 import pytest
 from pathlib import Path
+from sqlalchemy.sql import text
 
 # Add debugging information
 print("\nCurrent working directory:", os.getcwd())
@@ -39,7 +40,29 @@ except ImportError as e:
 @pytest.fixture(scope="session")
 def database():
     """Create a test database instance"""
-    return Database(db_path="books.db")
+    db = Database(db_path="books.db")
+    
+    # Drop all tables and recreate schema
+    Base.metadata.drop_all(db.engine)
+    Base.metadata.create_all(db.engine)
+    
+    return db
+
+@pytest.fixture(autouse=True)
+def cleanup_db(db_session):
+    """Clean up database tables before each test"""
+    # Delete all data from tables in reverse order of dependencies
+    db_session.execute(text("DELETE FROM book_series"))
+    db_session.execute(text("DELETE FROM book_genre"))
+    db_session.execute(text("DELETE FROM book_author"))
+    db_session.execute(text("DELETE FROM series"))
+    db_session.execute(text("DELETE FROM book"))
+    db_session.execute(text("DELETE FROM author"))
+    db_session.execute(text("DELETE FROM genre"))
+    db_session.commit()
+    yield
+    # Clean up after test as well
+    db_session.rollback()
 
 @pytest.fixture(scope="function")
 def db_session(database):
