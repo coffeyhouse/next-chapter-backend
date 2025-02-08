@@ -36,10 +36,13 @@ class AuthorRepository:
     def get_unsynced_authors(self, days_old: int = 30) -> List[Author]:
         """Get authors not synced within specified days"""
         cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
-        return self.session.query(Author).filter(
+        query = self.session.query(Author).filter(
             (Author.last_synced_at.is_(None)) | 
             (Author.last_synced_at < cutoff_date)
-        ).order_by(Author.last_synced_at.asc().nullsfirst()).all()
+        ).order_by(Author.last_synced_at.asc().nullsfirst())
+        
+        authors = query.all()
+        return [author for author in authors if author is not None]
 
     def get_prolific_authors(self, min_books: int = 5) -> List[Author]:
         """Get authors with at least the specified number of books"""
