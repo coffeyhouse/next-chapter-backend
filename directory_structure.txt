@@ -54,6 +54,20 @@
 |   |-- author_service.py [empty]
 |   |-- book_service.py
 |   |-- series_service.py [empty]
+|   +-- sqlalchemy/
+|   |   +-- models/
+|   |   |-- __init__.py
+|   |   |-- author.py
+|   |   |-- base.py
+|   |   |-- book.py
+|   |   |-- genre.py
+|   |   |-- library.py
+|   |   |-- series.py
+|   |   |-- user.py
+|   |   +-- repositories/
+|   |   |-- test_repo.py
+|   |-- __init__.py
+|   |-- database.py
 |   +-- utils/
 |   |   +-- proxy/
 |   |   |-- proxy_manager.py
@@ -82,3 +96,10 @@
 |   +-- images/
 |   |   +-- author/
 |   |   +-- book/
++-- tests/
+|   +-- sqlalchemy/
+|   |   +-- test_repositories/
+|   |   |-- test_book_repository.py
+|   |-- README.md
+|   |-- conftest.py
+|   |-- test_models.py
