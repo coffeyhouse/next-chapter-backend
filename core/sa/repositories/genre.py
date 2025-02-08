@@ -2,8 +2,8 @@
 
 from typing import List, Optional
 from sqlalchemy import func, desc
-from sqlalchemy.orm import Session
-from core.sa.models import Genre, Book
+from sqlalchemy.orm import Session, joinedload
+from core.sa.models import Genre, Book, BookGenre
 
 class GenreRepository:
     """Repository for managing Genre entities."""
@@ -54,7 +54,13 @@ class GenreRepository:
         book = self.session.query(Book).filter(Book.goodreads_id == goodreads_id).first()
         if not book:
             return []
-        return book.genres
+        return (
+            self.session.query(Genre)
+            .join(Genre.book_genres)
+            .join(BookGenre.book)
+            .filter(Book.goodreads_id == goodreads_id)
+            .all()
+        )
 
     def get_popular_genres(self, limit: int = 10) -> List[Genre]:
         """Get genres ordered by number of associated books.
@@ -66,9 +72,10 @@ class GenreRepository:
             List of Genre objects ordered by popularity
         """
         return (self.session.query(Genre)
-                .outerjoin(Genre.books)
+                .outerjoin(Genre.book_genres)
                 .group_by(Genre)
-                .order_by(desc(func.count(Book.goodreads_id)))
+                .order_by(desc(func.count(BookGenre.work_id)))
+                .options(joinedload(Genre.book_genres).joinedload(BookGenre.book))
                 .limit(limit)
                 .all())
 
@@ -102,10 +109,35 @@ class GenreRepository:
         if not source or not target:
             return None
 
-        # Move all books from source to target
-        for book in source.books:
-            if book not in target.books:
-                target.books.append(book)
+        # Get all books associated with the source genre
+        source_books = (
+            self.session.query(Book)
+            .join(Book.book_genres)
+            .filter(BookGenre.genre_id == source.id)
+            .all()
+        )
+
+        # Delete all book-genre associations for the source genre
+        self.session.query(BookGenre).filter(BookGenre.genre_id == source.id).delete()
+
+        # Create new book-genre associations with the target genre
+        for book in source_books:
+            # Check if this book is already associated with the target genre
+            existing = (
+                self.session.query(BookGenre)
+                .filter(
+                    BookGenre.work_id == book.work_id,
+                    BookGenre.genre_id == target.id
+                )
+                .first()
+            )
+            if not existing:
+                # Create new association with target genre
+                new_book_genre = BookGenre(
+                    work_id=book.work_id,
+                    genre_id=target.id
+                )
+                self.session.add(new_book_genre)
 
         # Delete the source genre
         self.session.delete(source)

@@ -1,60 +1,70 @@
 # core/sa/models/book.py
-from sqlalchemy import Column, String, Integer, Float, Boolean, ForeignKey, Table, DateTime
-from sqlalchemy.orm import relationship
-from .base import Base, TimestampMixin
+from datetime import datetime
+from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, Table, DateTime
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from .base import Base, TimestampMixin, LastSyncedMixin
 
-# Association tables for many-to-many relationships
-book_author = Table(
-    'book_author',
-    Base.metadata,
-    Column('work_id', String, ForeignKey('book.work_id'), primary_key=True),
-    Column('author_id', String, ForeignKey('author.goodreads_id'), primary_key=True),
-    Column('role', String)
-)
+class BookAuthor(Base, TimestampMixin):
+    __tablename__ = 'book_author'
 
-book_genre = Table(
-    'book_genre',
-    Base.metadata,
-    Column('work_id', String, ForeignKey('book.work_id'), primary_key=True),
-    Column('genre_id', Integer, ForeignKey('genre.id'), primary_key=True)
-)
-
-book_similar = Table(
-    'book_similar',
-    Base.metadata,
-    Column('work_id', String, ForeignKey('book.work_id'), primary_key=True),
-    Column('similar_work_id', String, ForeignKey('book.work_id'), primary_key=True)
-)
-
-class Book(Base, TimestampMixin):
-    __tablename__ = 'book'
-
-    goodreads_id = Column(String, primary_key=True)
-    work_id = Column(String, unique=True, nullable=False)
-    title = Column(String, nullable=False)
-    published_date = Column(DateTime)
-    published_state = Column(String)
-    language = Column(String)
-    calibre_id = Column(Integer)
-    pages = Column(Integer)
-    isbn = Column(String)
-    goodreads_rating = Column(Float)
-    goodreads_votes = Column(Integer)
-    description = Column(String)
-    image_url = Column(String)
-    source = Column(String)
-    hidden = Column(Boolean, default=False)
+    work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+    author_id: Mapped[str] = mapped_column(ForeignKey('author.goodreads_id'), primary_key=True)
+    role: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
-    authors = relationship('Author', secondary='book_author', back_populates='books')
-    genres = relationship('Genre', secondary='book_genre', back_populates='books')
-    series = relationship('Series', secondary='book_series', back_populates='books')
-    
-    # Self-referential relationship for similar books
-    similar_to = relationship(
-        'Book',
-        secondary=book_similar,
-        primaryjoin=work_id==book_similar.c.work_id,
-        secondaryjoin=work_id==book_similar.c.similar_work_id,
-        backref='similar_books'
-    )
+    book = relationship('Book', back_populates='book_authors')
+    author = relationship('Author', back_populates='book_authors')
+
+class BookGenre(Base, TimestampMixin):
+    __tablename__ = 'book_genre'
+
+    work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+    genre_id: Mapped[int] = mapped_column(ForeignKey('genre.id'), primary_key=True)
+
+    # Relationships
+    book = relationship('Book', back_populates='book_genres')
+    genre = relationship('Genre', back_populates='book_genres')
+
+class BookSimilar(Base, TimestampMixin):
+    __tablename__ = 'book_similar'
+
+    work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+    similar_work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+
+    # Relationships
+    book = relationship('Book', foreign_keys=[work_id], back_populates='similar_to')
+    similar_book = relationship('Book', foreign_keys=[similar_work_id], back_populates='similar_books')
+
+class Book(Base, TimestampMixin, LastSyncedMixin):
+    __tablename__ = 'book'
+
+    goodreads_id: Mapped[str] = mapped_column(String, primary_key=True)
+    work_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    published_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    published_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    language: Mapped[str | None] = mapped_column(String, nullable=True)
+    calibre_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    isbn: Mapped[str | None] = mapped_column(String, nullable=True)
+    goodreads_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    goodreads_votes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Relationships
+    book_authors = relationship('BookAuthor', back_populates='book')
+    book_genres = relationship('BookGenre', back_populates='book')
+    book_users = relationship('BookUser', back_populates='book')
+    book_series = relationship('BookSeries', back_populates='book')
+    library_entries = relationship('Library', back_populates='book')
+    similar_to = relationship('BookSimilar', foreign_keys=[BookSimilar.work_id], back_populates='book')
+    similar_books = relationship('BookSimilar', foreign_keys=[BookSimilar.similar_work_id], back_populates='similar_book')
+
+    # Convenience relationships
+    authors = relationship('Author', secondary='book_author', viewonly=True)
+    genres = relationship('Genre', secondary='book_genre', viewonly=True)
+    users = relationship('User', secondary='book_user', viewonly=True)
+    series = relationship('Series', secondary='book_series', viewonly=True)

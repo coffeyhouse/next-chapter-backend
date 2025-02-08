@@ -1,24 +1,25 @@
 # core/sa/models/__init__.py
-from .base import Base, TimestampMixin
-from .book import Book, book_author, book_genre, book_similar
+from .base import Base, TimestampMixin, LastSyncedMixin
+from .book import Book, BookAuthor, BookGenre, BookSimilar
 from .author import Author
 from .series import Series, BookSeries
 from .genre import Genre
 from .library import Library
-from .user import User, book_user
+from .user import User, BookUser
 
 __all__ = [
     'Base',
     'TimestampMixin',
+    'LastSyncedMixin',
     'Book',
     'Author',
     'Series',
-    'BookSeries',
     'Genre',
     'Library',
     'User',
-    'book_author',
-    'book_genre',
-    'book_similar',
-    'book_user'
+    'BookAuthor',
+    'BookGenre',
+    'BookSeries',
+    'BookSimilar',
+    'BookUser'
 ]

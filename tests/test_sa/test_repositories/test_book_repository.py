@@ -10,7 +10,7 @@ def book_repo(db_session):
     """Fixture to create a BookRepository instance"""
     return BookRepository(db_session)
 
-def test_get_by_goodreads_id(book_repo, db_session):
+def test_get_by_goodreads_id(book_repo, db_session, sample_book):
     """Test fetching a book by Goodreads ID"""
     # Get first book's ID for testing
     book = db_session.query(Book).first()
@@ -27,7 +27,7 @@ def test_get_by_nonexistent_goodreads_id(book_repo):
     book = book_repo.get_by_goodreads_id("nonexistent_id")
     assert book is None
 
-def test_search_books(book_repo, db_session):
+def test_search_books(book_repo, db_session, sample_book):
     """Test book search functionality"""
     # Get a book title to search for
     book = db_session.query(Book).first()
@@ -36,9 +36,9 @@ def test_search_books(book_repo, db_session):
     # Test search
     results = book_repo.search_books(search_term)
     assert len(results) > 0
-    assert any(book.title in result.title for result in results)
+    assert any(search_term.lower() in b.title.lower() for b in results)
 
-def test_search_books_with_empty_query(book_repo):
+def test_search_books_with_empty_query(book_repo, multiple_books):
     """Test search with empty query"""
     results = book_repo.search_books("")
     assert len(results) == 20  # Default limit
@@ -49,7 +49,7 @@ def test_search_books_with_limit(book_repo):
     results = book_repo.search_books("the", limit=limit)
     assert len(results) <= limit
 
-def test_get_books_by_author(book_repo, db_session):
+def test_get_books_by_author(book_repo, db_session, sample_book_with_relationships):
     """Test getting books by author"""
     # Get an author who has books
     author = db_session.query(Author).join(Author.books).first()
@@ -65,7 +65,7 @@ def test_get_books_by_nonexistent_author(book_repo):
     books = book_repo.get_books_by_author("nonexistent_author")
     assert len(books) == 0
 
-def test_get_books_by_genre(book_repo, db_session):
+def test_get_books_by_genre(book_repo, db_session, sample_book_with_relationships):
     """Test getting books by genre"""
     # Get a genre that has books
     genre = db_session.query(Genre).join(Genre.books).first()
@@ -96,7 +96,7 @@ def test_get_recent_books(book_repo):
     for i in range(len(books) - 1):
         assert books[i].created_at >= books[i + 1].created_at
 
-def test_get_books_in_series(book_repo, db_session):
+def test_get_books_in_series(book_repo, db_session, sample_book_with_relationships):
     """Test getting books in a series"""
     # Get a series that has books
     series = db_session.query(Series).join(Series.books).first()

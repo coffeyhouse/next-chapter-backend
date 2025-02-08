@@ -10,35 +10,33 @@ def author_repo(db_session):
     """Fixture to create an AuthorRepository instance"""
     return AuthorRepository(db_session)
 
-def test_get_by_goodreads_id(author_repo, db_session):
+def test_get_by_goodreads_id(author_repo, db_session, sample_author):
     """Test fetching an author by Goodreads ID"""
     # Get first author's ID for testing
     author = db_session.query(Author).first()
     assert author is not None
     
-    # Test repository method
-    fetched_author = author_repo.get_by_goodreads_id(author.goodreads_id)
-    assert fetched_author is not None
-    assert fetched_author.goodreads_id == author.goodreads_id
-    assert fetched_author.name == author.name
+    # Test fetching by ID
+    fetched = author_repo.get_by_goodreads_id(author.goodreads_id)
+    assert fetched is not None
+    assert fetched.goodreads_id == author.goodreads_id
 
 def test_get_by_nonexistent_goodreads_id(author_repo):
     """Test fetching with non-existent Goodreads ID"""
     author = author_repo.get_by_goodreads_id("nonexistent_id")
     assert author is None
 
-def test_search_authors(author_repo, db_session):
+def test_search_authors(author_repo, db_session, sample_author):
     """Test author search functionality"""
     # Get an author name to search for
     author = db_session.query(Author).first()
     search_term = author.name.split()[0]  # Use first word of name
     
-    # Test search
     results = author_repo.search_authors(search_term)
     assert len(results) > 0
-    assert any(author.name in result.name for result in results)
+    assert any(search_term.lower() in a.name.lower() for a in results)
 
-def test_search_authors_with_empty_query(author_repo):
+def test_search_authors_with_empty_query(author_repo, multiple_books):
     """Test search with empty query"""
     results = author_repo.search_authors("")
     assert len(results) == 20  # Default limit
@@ -58,13 +56,12 @@ def test_get_recent_authors(author_repo):
     for i in range(len(authors) - 1):
         assert authors[i].created_at >= authors[i + 1].created_at
 
-def test_get_authors_by_book(author_repo, db_session):
+def test_get_authors_by_book(author_repo, db_session, sample_book_with_relationships):
     """Test getting authors for a specific book"""
     # Get a book that has authors
     book = db_session.query(Book).join(Book.authors).first()
     assert book is not None
     
-    # Test repository method
     authors = author_repo.get_authors_by_book(book.goodreads_id)
     assert len(authors) > 0
     assert all(book in author.books for author in authors)

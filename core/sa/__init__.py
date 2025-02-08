@@ -2,8 +2,8 @@
 from .database import Database
 from .models import (
     Base, Book, Author, Series, Genre,
-    Library, User, book_author, book_genre,
-    BookSeries, book_similar, book_user
+    Library, User, BookAuthor, BookGenre,
+    BookSeries, BookSimilar, BookUser
 )
 
 __all__ = [
@@ -15,9 +15,9 @@ __all__ = [
     'Genre',
     'Library',
     'User',
-    'book_author',
-    'book_genre',
+    'BookAuthor',
+    'BookGenre',
     'BookSeries',
-    'book_similar',
-    'book_user'
+    'BookSimilar',
+    'BookUser'
 ]

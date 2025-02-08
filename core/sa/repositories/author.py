@@ -15,9 +15,10 @@ class AuthorRepository:
 
     def search_authors(self, query: str, limit: int = 20) -> List[Author]:
         """Search authors by name"""
-        return self.session.query(Author).filter(
-            Author.name.ilike(f"%{query}%")
-        ).limit(limit).all()
+        base_query = self.session.query(Author)
+        if query:  # Only apply filter if query is not empty
+            base_query = base_query.filter(Author.name.ilike(f"%{query}%"))
+        return base_query.limit(limit).all()
 
     def get_recent_authors(self, limit: int = 10) -> List[Author]:
         """Get recently added authors"""

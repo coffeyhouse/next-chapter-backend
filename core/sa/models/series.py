@@ -1,21 +1,28 @@
 # core/sa/models/series.py
-from sqlalchemy import Column, String, Float, ForeignKey
-from sqlalchemy.orm import relationship
-from .base import Base, TimestampMixin
+from sqlalchemy import String, Float, ForeignKey
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from .base import Base, TimestampMixin, LastSyncedMixin
 
 class BookSeries(Base, TimestampMixin):
     """Association model for books in series"""
     __tablename__ = 'book_series'
 
-    work_id = Column(String, ForeignKey('book.work_id'), primary_key=True)
-    series_id = Column(String, ForeignKey('series.goodreads_id'), primary_key=True)
-    series_order = Column(Float)
-
-class Series(Base, TimestampMixin):
-    __tablename__ = 'series'
-
-    goodreads_id = Column(String, primary_key=True)
-    title = Column(String, nullable=False)
+    work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+    series_id: Mapped[str] = mapped_column(ForeignKey('series.goodreads_id'), primary_key=True)
+    series_order: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Relationships
-    books = relationship('Book', secondary='book_series', back_populates='series')
+    book = relationship('Book', back_populates='book_series')
+    series = relationship('Series', back_populates='book_series')
+
+class Series(Base, TimestampMixin, LastSyncedMixin):
+    __tablename__ = 'series'
+
+    goodreads_id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Relationships
+    book_series = relationship('BookSeries', back_populates='series')
+    
+    # Convenience relationship
+    books = relationship('Book', secondary='book_series', viewonly=True)

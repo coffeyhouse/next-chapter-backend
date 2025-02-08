@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timedelta, UTC
 from core.sa.repositories.genre import GenreRepository
-from core.sa.models import Genre, Book
+from core.sa.models import Genre, Book, BookGenre
 
 @pytest.fixture
 def genre_repo(db_session):
@@ -33,7 +33,11 @@ def sample_book(db_session):
 @pytest.fixture
 def genre_with_book(db_session, sample_genre, sample_book):
     """Fixture to associate a sample Genre with a Book."""
-    sample_genre.books.append(sample_book)
+    book_genre = BookGenre(
+        work_id=sample_book.work_id,
+        genre_id=sample_genre.id
+    )
+    db_session.add(book_genre)
     db_session.commit()
     return sample_genre
 
@@ -104,9 +108,16 @@ def test_get_genres_by_book(genre_repo, db_session, sample_book):
         Genre(name="Genre 1"),
         Genre(name="Genre 2")
     ]
-    for genre in genres:
-        genre.books.append(sample_book)
     db_session.add_all(genres)
+    db_session.commit()
+
+    # Create book-genre associations
+    for genre in genres:
+        book_genre = BookGenre(
+            work_id=sample_book.work_id,
+            genre_id=genre.id
+        )
+        db_session.add(book_genre)
     db_session.commit()
 
     results = genre_repo.get_genres_by_book(sample_book.goodreads_id)
@@ -131,9 +142,20 @@ def test_get_popular_genres(genre_repo, db_session):
     db_session.commit()
 
     # Add different numbers of books to each genre
-    genres[0].books.extend(books[0:3])  # 3 books
-    genres[1].books.extend(books[1:4])  # 3 books
-    genres[2].books.append(books[0])    # 1 book
+    # Genre 0: 3 books
+    for book in books[0:3]:
+        book_genre = BookGenre(work_id=book.work_id, genre_id=genres[0].id)
+        db_session.add(book_genre)
+
+    # Genre 1: 3 books
+    for book in books[1:4]:
+        book_genre = BookGenre(work_id=book.work_id, genre_id=genres[1].id)
+        db_session.add(book_genre)
+
+    # Genre 2: 1 book
+    book_genre = BookGenre(work_id=books[0].work_id, genre_id=genres[2].id)
+    db_session.add(book_genre)
+
     db_session.commit()
 
     results = genre_repo.get_popular_genres(limit=2)
@@ -176,11 +198,13 @@ def test_merge_genres(genre_repo, db_session):
         Book(goodreads_id=f"book_{i}", work_id=f"work_{i}", title=f"Book {i}")
         for i in range(2)
     ]
-    
-    source.books.append(books[0])
-    target.books.append(books[1])
-    
     db_session.add_all([source, target] + books)
+    db_session.commit()
+    
+    # Create book-genre associations
+    book_genre1 = BookGenre(work_id=books[0].work_id, genre_id=source.id)
+    book_genre2 = BookGenre(work_id=books[1].work_id, genre_id=target.id)
+    db_session.add_all([book_genre1, book_genre2])
     db_session.commit()
 
     # Perform merge

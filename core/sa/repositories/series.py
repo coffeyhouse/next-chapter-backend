@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
-from core.sa.models import Series, Book
+from core.sa.models import Series, Book, BookSeries
 
 class SeriesRepository:
     def __init__(self, session: Session):
@@ -32,7 +32,9 @@ class SeriesRepository:
         """
         return (
             self.session.query(Series)
-            .options(joinedload(Series.books))
+            .options(
+                joinedload(Series.book_series).joinedload(BookSeries.book)
+            )
             .filter(Series.goodreads_id == goodreads_id)
             .first()
         )
@@ -43,7 +45,8 @@ class SeriesRepository:
         """
         return (
             self.session.query(Series)
-            .join(Series.books)
+            .join(Series.book_series)
+            .join(BookSeries.book)
             .filter(Book.goodreads_id == book_id)
             .all()
         )

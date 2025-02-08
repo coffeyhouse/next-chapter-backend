@@ -33,7 +33,12 @@ def sample_book(db_session):
 @pytest.fixture
 def series_with_book(db_session, sample_series, sample_book):
     """Fixture to associate a sample Series with a Book."""
-    sample_series.books.append(sample_book)
+    book_series = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=sample_series.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add(book_series)
     db_session.commit()
     return sample_series
 
@@ -129,8 +134,15 @@ def test_search_series_special_characters(series_repo, db_session):
 def test_get_series_with_books(series_repo, db_session, sample_book):
     """Test retrieving a series along with its associated books."""
     test_series = Series(goodreads_id="series_with_books", title="Series With Books")
-    test_series.books.append(sample_book)
     db_session.add(test_series)
+    db_session.commit()
+
+    book_series = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=test_series.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add(book_series)
     db_session.commit()
 
     fetched = series_repo.get_series_with_books("series_with_books")
@@ -155,9 +167,21 @@ def test_get_series_by_book(series_repo, db_session, sample_book):
     """Test retrieving series that include a specific book."""
     series1 = Series(goodreads_id="series_by_book_1", title="Series One")
     series2 = Series(goodreads_id="series_by_book_2", title="Series Two")
-    series1.books.append(sample_book)
-    series2.books.append(sample_book)
     db_session.add_all([series1, series2])
+    db_session.commit()
+
+    # Create book-series associations
+    book_series1 = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=series1.goodreads_id,
+        series_order=1.0
+    )
+    book_series2 = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=series2.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add_all([book_series1, book_series2])
     db_session.commit()
 
     results = series_repo.get_series_by_book(sample_book.goodreads_id)
