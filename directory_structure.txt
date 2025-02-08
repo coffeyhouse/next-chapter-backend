@@ -17,6 +17,18 @@
 |-- __init__.py [empty]
 |-- main.py
 +-- combined_files/
+|-- api-routes.txt
+|-- api.txt
+|-- cli-commands.txt
+|-- cli.txt
+|-- core-database.txt
+|-- core-models.txt
+|-- core-resolvers.txt
+|-- core-scrapers.txt
+|-- core-services.txt
+|-- core-utils-proxy.txt
+|-- core-utils.txt
+|-- core.txt
 +-- core/
 |   +-- database/
 |   |-- __init__.py
