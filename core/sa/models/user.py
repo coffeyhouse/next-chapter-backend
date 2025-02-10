@@ -22,7 +22,7 @@ class User(Base, TimestampMixin):
     __tablename__ = 'user'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
 
     # Relationships
     book_users = relationship('BookUser', back_populates='user')

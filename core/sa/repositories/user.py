@@ -2,6 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError
 from core.sa.models import User, Book, BookUser
 
 class UserRepository:
@@ -14,6 +15,141 @@ class UserRepository:
             session: SQLAlchemy session for database operations
         """
         self.session = session
+
+    def create_user(self, name: str) -> User:
+        """Create a new user.
+        
+        Args:
+            name: The name of the user
+            
+        Returns:
+            The created User object
+            
+        Raises:
+            ValueError: If a user with the given name already exists
+        """
+        # Check if user already exists
+        existing = self.session.query(User).filter(User.name == name).first()
+        if existing:
+            raise ValueError(f"User with name '{name}' already exists")
+
+        user = User(name=name)
+        self.session.add(user)
+        try:
+            self.session.commit()
+            return user
+        except IntegrityError:
+            self.session.rollback()
+            raise ValueError(f"User with name '{name}' already exists")
+
+    def update_user(self, user_id: int, name: str) -> Optional[User]:
+        """Update a user's details.
+        
+        Args:
+            user_id: The ID of the user to update
+            name: The new name for the user
+            
+        Returns:
+            The updated User object if found, None otherwise
+        """
+        user = self.get_by_id(user_id)
+        if not user:
+            return None
+            
+        user.name = name
+        self.session.commit()
+        return user
+
+    def delete_book_status(self, user_id: int, work_id: str) -> bool:
+        """Delete a book status for a user.
+        
+        Args:
+            user_id: The ID of the user
+            work_id: The work ID of the book
+            
+        Returns:
+            True if the status was deleted, False if not found
+        """
+        result = (
+            self.session.query(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.work_id == work_id
+            )
+            .delete()
+        )
+        self.session.commit()
+        return result > 0
+
+    def get_user_stats(self, user_id: int) -> dict:
+        """Get reading statistics for a user.
+        
+        Args:
+            user_id: The ID of the user
+            
+        Returns:
+            Dictionary containing various reading statistics
+        """
+        user = self.get_user_with_books(user_id)
+        if not user:
+            return None
+
+        # Get current year
+        current_year = datetime.now(UTC).year
+        
+        # Calculate statistics
+        total_books = len(user.book_users)
+        books_read_this_year = sum(
+            1 for bu in user.book_users 
+            if bu.status == "completed" and bu.finished_at 
+            and bu.finished_at.year == current_year
+        )
+        currently_reading = sum(1 for bu in user.book_users if bu.status == "reading")
+        want_to_read = sum(1 for bu in user.book_users if bu.status == "want_to_read")
+        
+        # Calculate average rating if available
+        completed_books = [bu.book for bu in user.book_users if bu.status == "completed"]
+        ratings = [b.goodreads_rating for b in completed_books if b.goodreads_rating is not None]
+        average_rating = sum(ratings) / len(ratings) if ratings else None
+        
+        # Calculate favorite genres
+        genre_counts = {}
+        for bu in user.book_users:
+            for genre in bu.book.genres:
+                genre_counts[genre.name] = genre_counts.get(genre.name, 0) + 1
+        favorite_genres = sorted(genre_counts.keys(), key=lambda x: genre_counts[x], reverse=True)[:5]
+        
+        # Calculate reading pace (books per month)
+        completed_statuses = [
+            bu for bu in user.book_users 
+            if bu.status == "completed" and bu.started_at and bu.finished_at
+        ]
+        if completed_statuses:
+            total_reading_days = sum(
+                (bu.finished_at - bu.started_at).days
+                for bu in completed_statuses
+            )
+            reading_pace = (len(completed_statuses) * 30) / total_reading_days if total_reading_days > 0 else None
+        else:
+            reading_pace = None
+        
+        # Calculate total pages read
+        total_pages = sum(
+            bu.book.pages or 0
+            for bu in user.book_users
+            if bu.status == "completed" and bu.book.pages
+        )
+        
+        return {
+            "total_books": total_books,
+            "books_read_this_year": books_read_this_year,
+            "currently_reading": currently_reading,
+            "want_to_read": want_to_read,
+            "average_rating": average_rating,
+            "favorite_genres": favorite_genres,
+            "reading_pace": reading_pace,
+            "total_pages_read": total_pages or None
+        }
 
     def get_by_id(self, user_id: int) -> Optional[User]:
         """Get a user by their ID.
@@ -112,6 +248,7 @@ class UserRepository:
             .options(
                 joinedload(User.book_users)
                 .joinedload(BookUser.book)
+                .joinedload(Book.genres)
             )
             .filter(User.id == user_id)
             .first()

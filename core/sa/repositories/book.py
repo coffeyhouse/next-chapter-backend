@@ -18,10 +18,25 @@ class BookRepository:
         return self.session.query(Book).filter(Book.work_id == work_id).first()
 
     def search_books(self, query: str, limit: int = 20) -> List[Book]:
-        """Search books by title"""
-        return self.session.query(Book).filter(
-            Book.title.ilike(f"%{query}%")
-        ).limit(limit).all()
+        """Search books by title and include author relationships.
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of Book objects with loaded author relationships
+        """
+        base_query = self.session.query(Book).options(
+            joinedload(Book.authors),
+            joinedload(Book.genres),
+            joinedload(Book.series)
+        )
+        
+        if query and query.strip():
+            base_query = base_query.filter(Book.title.ilike(f"%{query}%"))
+        
+        return base_query.order_by(desc(Book.goodreads_rating)).limit(limit).all()
 
     def get_books_by_author(self, author_id: str) -> List[Book]:
         """Get all books by a specific author"""

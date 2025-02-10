@@ -44,6 +44,36 @@ def user_with_book(db_session, sample_user, sample_book):
     db_session.commit()
     return sample_user
 
+def test_create_user(user_repo):
+    """Test creating a new user."""
+    user = user_repo.create_user(name="John Doe")
+    assert user is not None
+    assert user.name == "John Doe"
+    assert user.id is not None
+
+def test_create_duplicate_user(user_repo, sample_user):
+    """Test that creating a user with a duplicate name raises an error."""
+    with pytest.raises(ValueError, match="User with name 'Test User' already exists"):
+        user_repo.create_user(name="Test User")
+
+def test_create_user_case_sensitive(user_repo, sample_user):
+    """Test that user names are case-sensitive."""
+    # This should work since it's a different case
+    user = user_repo.create_user(name="TEST USER")
+    assert user is not None
+    assert user.name == "TEST USER"
+
+def test_update_user(user_repo, sample_user):
+    """Test updating a user's name."""
+    updated = user_repo.update_user(user_id=sample_user.id, name="Updated Name")
+    assert updated is not None
+    assert updated.name == "Updated Name"
+
+def test_update_user_nonexistent(user_repo):
+    """Test updating a non-existent user."""
+    result = user_repo.update_user(user_id=999, name="New Name")
+    assert result is None
+
 def test_get_by_id(user_repo, sample_user):
     """Test fetching a user by their ID."""
     fetched = user_repo.get_by_id(sample_user.id)
@@ -217,4 +247,83 @@ def test_update_book_status_nonexistent_book(user_repo, sample_user):
         goodreads_id="nonexistent",
         status="reading"
     )
-    assert result is None 
+    assert result is None
+
+def test_delete_book_status(user_repo, db_session, sample_user, sample_book):
+    """Test deleting a book status."""
+    # Create book-user relationship
+    book_user = BookUser(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id,
+        status="reading"
+    )
+    db_session.add(book_user)
+    db_session.commit()
+
+    # Delete the status
+    success = user_repo.delete_book_status(sample_user.id, sample_book.work_id)
+    assert success is True
+
+    # Verify it's deleted
+    result = db_session.query(BookUser).filter_by(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id
+    ).first()
+    assert result is None
+
+def test_delete_nonexistent_book_status(user_repo):
+    """Test deleting a non-existent book status."""
+    success = user_repo.delete_book_status(999, "nonexistent_work_id")
+    assert success is False
+
+def test_get_user_stats(user_repo, db_session, sample_user, sample_book):
+    """Test getting user reading statistics."""
+    # Create book-user relationships with different statuses
+    now = datetime.now(UTC)
+    book_users = [
+        BookUser(
+            work_id=sample_book.work_id,
+            user_id=sample_user.id,
+            status="completed",
+            started_at=now - timedelta(days=30),
+            finished_at=now
+        ),
+        BookUser(
+            work_id="work_2",
+            user_id=sample_user.id,
+            status="reading",
+            started_at=now
+        ),
+        BookUser(
+            work_id="work_3",
+            user_id=sample_user.id,
+            status="want_to_read"
+        )
+    ]
+    
+    # Create additional books
+    books = [
+        Book(
+            goodreads_id="book_2",
+            work_id="work_2",
+            title="Test Book 2",
+            pages=200
+        ),
+        Book(
+            goodreads_id="book_3",
+            work_id="work_3",
+            title="Test Book 3",
+            pages=300
+        )
+    ]
+    
+    db_session.add_all(books)
+    db_session.add_all(book_users)
+    db_session.commit()
+
+    stats = user_repo.get_user_stats(sample_user.id)
+    assert stats is not None
+    assert stats["total_books"] == 3
+    assert stats["currently_reading"] == 1
+    assert stats["want_to_read"] == 1
+    assert stats["books_read_this_year"] == 1 
