@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from core.resolvers.book_resolver import BookResolver
-from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library
+from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
 import sqlite3
 
 @click.group()
@@ -109,7 +109,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                     
                     try:
                         # Try to create the book
-                        book_obj = creator.create_book_from_goodreads(calibre_data['goodreads_id'])
+                        book_obj = creator.create_book_from_goodreads(calibre_data['goodreads_id'], source='library')
                         if book_obj:
                             # Create library entry
                             library_entry = Library(
@@ -277,6 +277,100 @@ def empty_db(force: bool):
     except Exception as e:
         session.rollback()
         click.echo(click.style(f"\nError emptying database: {str(e)}", fg='red'))
+        raise
+    finally:
+        session.close()
+
+@library.command()
+@click.argument('source')
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def delete_by_source(source: str, force: bool, verbose: bool):
+    """Delete all books from a specific source
+    
+    This command will delete all books and their relationships that came from the specified source.
+    Common sources are: 'library', 'series', 'goodreads'
+    
+    Example:
+        cli library delete-by-source series  # Delete all books from series
+        cli library delete-by-source library --force  # Delete library books without confirmation
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get count of books to delete
+        count = session.query(Book).filter(Book.source == source).count()
+        
+        if count == 0:
+            click.echo(click.style(f"\nNo books found with source: {source}", fg='yellow'))
+            return
+            
+        # Show what will be deleted
+        click.echo("\n" + click.style(f"This will delete {count} books with source '{source}'", fg='yellow'))
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to delete these books?", abort=True)
+            click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
+        
+        # Get books to delete
+        books = session.query(Book).filter(Book.source == source).all()
+        
+        deleted = 0
+        skipped = []
+        
+        # Process each book
+        with click.progressbar(
+            books,
+            label=click.style('Deleting books', fg='blue'),
+            item_show_func=lambda b: click.style(b.title, fg='cyan') if b and verbose else None,
+            show_eta=True,
+            show_percent=True,
+            width=50
+        ) as books_iter:
+            for book in books_iter:
+                try:
+                    # Delete relationships first
+                    session.query(BookAuthor).filter_by(work_id=book.work_id).delete()
+                    session.query(BookGenre).filter_by(work_id=book.work_id).delete()
+                    session.query(BookSeries).filter_by(work_id=book.work_id).delete()
+                    session.query(Library).filter_by(work_id=book.work_id).delete()
+                    session.query(BookScraped).filter_by(work_id=book.work_id).delete()
+                    
+                    # Delete the book
+                    session.delete(book)
+                    session.commit()
+                    deleted += 1
+                    
+                except Exception as e:
+                    skipped.append({
+                        'title': book.title,
+                        'goodreads_id': book.goodreads_id,
+                        'reason': f"Error: {str(e)}",
+                        'color': 'red'
+                    })
+                    session.rollback()
+        
+        # Print results
+        click.echo("\n" + click.style("Results:", fg='blue'))
+        click.echo(click.style("Deleted: ", fg='blue') + 
+                  click.style(str(deleted), fg='green') + 
+                  click.style(" books", fg='blue'))
+        
+        if skipped and verbose:
+            click.echo("\n" + click.style("Failed to delete:", fg='red'))
+            for skip_info in skipped:
+                click.echo("\n" + click.style(f"Title: {skip_info['title']}", fg=skip_info['color']))
+                click.echo(click.style(f"Goodreads ID: {skip_info['goodreads_id']}", fg=skip_info['color']))
+                click.echo(click.style(f"Reason: {skip_info['reason']}", fg=skip_info['color']))
+        elif skipped:
+            click.echo(click.style(f"\nFailed to delete {len(skipped)} books. ", fg='red') + 
+                      click.style("Use --verbose to see details.", fg='blue'))
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during deletion: {str(e)}", fg='red'), err=True)
         raise
     finally:
         session.close()

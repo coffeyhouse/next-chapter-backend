@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from ..sa.repositories.book import BookRepository
 from ..sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, BookScraped, Base
 from .book_resolver import BookResolver
+from ..exclusions import should_exclude_book, get_exclusion_reason
 from datetime import datetime, UTC
 
 class BookCreator:
@@ -13,15 +14,16 @@ class BookCreator:
         self.book_repository = BookRepository(session)
         self.resolver = BookResolver(scrape)
 
-    def create_book_from_goodreads(self, goodreads_id: str) -> Optional[Book]:
+    def create_book_from_goodreads(self, goodreads_id: str, source: str = 'goodreads') -> Optional[Book]:
         """
         Scrapes a book from Goodreads and creates it in the database
         
         Args:
             goodreads_id: Goodreads ID of the book to scrape and create
+            source: Source of the book (default: 'goodreads')
             
         Returns:
-            Created Book object or None if book already exists or was previously scraped
+            Created Book object or None if book already exists, was previously scraped, or is excluded
         """
                 
         # Check if book has been scraped before
@@ -41,6 +43,18 @@ class BookCreator:
         if not book_data:            
             return None
 
+        # Check exclusions before proceeding
+        exclusion_reason = get_exclusion_reason(book_data)
+        if exclusion_reason:
+            # Still track that we attempted to scrape this book
+            scraped = BookScraped(
+                goodreads_id=goodreads_id,
+                work_id=book_data.get('work_id')
+            )
+            self.session.add(scraped)
+            self.session.commit()
+            return None
+
         # Track successful scrape
         scraped = BookScraped(
             goodreads_id=goodreads_id,
@@ -55,6 +69,9 @@ class BookCreator:
             existing_book = self.book_repository.get_by_work_id(work_id)
             if existing_book:
                 return None
+
+        # Set the source in the book data
+        book_data['source'] = source
 
         # Create the book
         return self.create_book(book_data)

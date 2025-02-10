@@ -3,6 +3,8 @@
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 from core.sa.models import Series, Book, BookSeries
+from datetime import datetime, timedelta
+from sqlalchemy import or_
 
 class SeriesRepository:
     def __init__(self, session: Session):
@@ -61,3 +63,32 @@ class SeriesRepository:
             .limit(limit)
             .all()
         )
+
+    def get_series_needing_sync(self, days: int, limit: Optional[int] = None, source: Optional[str] = None) -> List[Series]:
+        """
+        Get series that haven't been synced in the specified number of days.
+        Optionally filter by source of the books in the series.
+        
+        Args:
+            days: Number of days since last sync
+            limit: Maximum number of series to return
+            source: Only include series with books from this source
+            
+        Returns:
+            List of Series objects that need updating
+        """
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        query = self.session.query(Series).filter(
+            or_(
+                Series.last_synced_at.is_(None),
+                Series.last_synced_at < cutoff_date
+            )
+        )
+        
+        if source:
+            query = query.join(Series.book_series).join(BookSeries.book).filter(Book.source == source)
+            
+        if limit:
+            query = query.limit(limit)
+            
+        return query.all()
