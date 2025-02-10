@@ -4,7 +4,7 @@ import sys
 import pytest
 from pathlib import Path
 from sqlalchemy.sql import text
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 
 # Add debugging information
 print("\nCurrent working directory:", os.getcwd())
@@ -242,3 +242,54 @@ def multiple_books(db_session, sample_genre, sample_series):
     
     db_session.commit()
     return books
+
+@pytest.fixture
+def sample_user(db_session):
+    """Create a sample user for testing."""
+    user = User(name="Test User")
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+@pytest.fixture
+def sample_user_with_books(db_session, sample_user, sample_book):
+    """Create a user with book relationships for testing."""
+    book_user = BookUser(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id,
+        status="reading",
+        source="test",
+        started_at=datetime.now(UTC)
+    )
+    db_session.add(book_user)
+    db_session.commit()
+    return sample_user
+
+@pytest.fixture
+def multiple_users_with_books(db_session, multiple_books):
+    """Create multiple users with book relationships for testing."""
+    users = []
+    statuses = ["reading", "completed", "want_to_read"]
+    
+    for i in range(5):  # Create 5 users
+        user = User(name=f"Test User {i}")
+        db_session.add(user)
+        db_session.commit()
+        
+        # Associate each user with some books
+        for j, book in enumerate(multiple_books[:3]):  # First 3 books
+            book_user = BookUser(
+                work_id=book.work_id,
+                user_id=user.id,
+                status=statuses[j % len(statuses)],
+                source="test",
+                started_at=datetime.now(UTC) - timedelta(days=i)
+            )
+            if book_user.status == "completed":
+                book_user.finished_at = datetime.now(UTC)
+            db_session.add(book_user)
+        
+        users.append(user)
+    
+    db_session.commit()
+    return users
