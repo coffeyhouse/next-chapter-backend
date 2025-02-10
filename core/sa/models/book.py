@@ -60,6 +60,7 @@ class Book(Base, TimestampMixin, LastSyncedMixin):
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    similar_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     book_authors = relationship('BookAuthor', back_populates='book')

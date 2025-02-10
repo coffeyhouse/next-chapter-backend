@@ -9,10 +9,10 @@ import click
 class RateLimiter:
     def __init__(self, 
                  min_delay: float = 0.2,
-                 max_delay: float = 0.5,
-                 burst_size: int = 100,
-                 min_burst_delay: float = 10.0,
-                 max_burst_delay: float = 30.0):
+                 max_delay: float = 0.3,
+                 burst_size: int = 150,
+                 min_burst_delay: float = 1.0,
+                 max_burst_delay: float = 3.0):
         """
         Initialize rate limiter with configurable delays.
         

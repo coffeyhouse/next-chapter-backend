@@ -1,9 +1,9 @@
 # core/sa/repositories/book.py
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, not_, exists
 from sqlalchemy.orm import Session, joinedload
-from ..models import Book, Author, Genre, Series
+from ..models import Book, Author, Genre, Series, BookSimilar
 
 class BookRepository:
     def __init__(self, session: Session):
@@ -101,3 +101,25 @@ class BookRepository:
             query = query.filter(Book.language == language)
             
         return query.limit(limit).all()
+
+    def get_books_without_similar(self, source: Optional[str] = None) -> List[Book]:
+        """Get books that don't have any similar books synced yet.
+        
+        Args:
+            source: Optional source filter (e.g. 'library' for library books)
+            
+        Returns:
+            List of Book objects that haven't been synced for similar books
+        """
+        # Start with base query
+        query = self.session.query(Book)
+        
+        # Add source filter if specified
+        if source:
+            query = query.filter(Book.source == source)
+        
+        # Filter for books that haven't been synced for similar books
+        query = query.filter(Book.similar_synced_at.is_(None))
+        
+        # Order by rating desc so we process popular books first
+        return query.order_by(desc(Book.goodreads_rating)).all()
