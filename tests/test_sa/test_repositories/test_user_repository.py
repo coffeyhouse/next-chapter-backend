@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timedelta, UTC
 from core.sa.repositories.user import UserRepository
-from core.sa.models import User, Book, BookUser
+from core.sa.models import User, Book, BookUser, Library
 
 @pytest.fixture
 def user_repo(db_session):
@@ -218,6 +218,15 @@ def test_get_user_with_books(user_repo, db_session, sample_user):
 
 def test_update_book_status(user_repo, db_session, sample_user, sample_book):
     """Test updating a user's book status."""
+    # Create a library entry for the book
+    library_entry = Library(
+        title=sample_book.title,
+        work_id=sample_book.work_id,
+        goodreads_id=sample_book.goodreads_id
+    )
+    db_session.add(library_entry)
+    db_session.commit()
+
     # Initial status update
     book_user = user_repo.update_book_status(
         user_id=sample_user.id,

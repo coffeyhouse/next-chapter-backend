@@ -1,6 +1,7 @@
 # core/database/queries.py
 from typing import Dict, List, Any, Protocol
-from datetime import datetime
+from datetime import datetime, UTC
+import sqlite3
 
 class QueryExecutor(Protocol):
     def execute_query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
@@ -248,3 +249,84 @@ class StatsQueries(BaseQueries):
             ORDER BY book_count DESC
         """
         return self.execute_query(sql)
+
+def get_reading_progress(calibre_path: str) -> List[Dict[str, Any]]:
+    """Get reading progress data from Calibre database.
+    
+    Args:
+        calibre_path: Path to Calibre metadata.db
+        
+    Returns:
+        List of dictionaries containing reading progress data for each book
+    """
+    with sqlite3.connect(calibre_path) as conn:
+        cursor = conn.execute("""
+            SELECT 
+                books.id AS calibre_id,
+                books.title,
+                gr.val AS goodreads_id,
+                -- Warren's reading data (custom columns)
+                warren_read.value AS warren_last_read,
+                warren_percent.value AS warren_read_percent,
+                -- Ruth's reading data (custom columns)
+                ruth_read.value AS ruth_last_read,
+                ruth_percent.value AS ruth_read_percent
+            FROM books
+            LEFT JOIN identifiers gr 
+                ON gr.book = books.id 
+                AND gr.type = 'goodreads'
+            -- Warren's reading data (custom columns)
+            LEFT JOIN custom_column_6 warren_read
+                ON warren_read.book = books.id
+            LEFT JOIN custom_column_5 warren_percent
+                ON warren_percent.book = books.id
+            -- Ruth's reading data (custom columns)
+            LEFT JOIN custom_column_14 ruth_read
+                ON ruth_read.book = books.id
+            LEFT JOIN custom_column_12 ruth_percent
+                ON ruth_percent.book = books.id
+            WHERE gr.val IS NOT NULL
+            AND (
+                warren_percent.value IS NOT NULL 
+                OR ruth_percent.value IS NOT NULL
+            )
+        """)
+        
+        # Convert to list of dictionaries
+        columns = [col[0] for col in cursor.description]
+        results = []
+        
+        for row in cursor.fetchall():
+            book_data = dict(zip(columns, row))
+            
+            # Convert percentages to floats, handling potential errors
+            try:
+                if book_data['warren_read_percent']:
+                    book_data['warren_read_percent'] = float(book_data['warren_read_percent'])
+                else:
+                    book_data['warren_read_percent'] = 0.0
+                    
+                if book_data['ruth_read_percent']:
+                    book_data['ruth_read_percent'] = float(book_data['ruth_read_percent'])
+                else:
+                    book_data['ruth_read_percent'] = 0.0
+            except (ValueError, TypeError):
+                # If conversion fails, set to 0
+                book_data['warren_read_percent'] = 0.0
+                book_data['ruth_read_percent'] = 0.0
+                
+            # Convert timestamps to datetime objects
+            for field in ['warren_last_read', 'ruth_last_read']:
+                if book_data[field]:
+                    try:
+                        # Parse ISO format timestamp and make it timezone-aware
+                        dt = datetime.fromisoformat(book_data[field])
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=UTC)
+                        book_data[field] = dt
+                    except (ValueError, TypeError):
+                        book_data[field] = None
+                
+            results.append(book_data)
+            
+        return results

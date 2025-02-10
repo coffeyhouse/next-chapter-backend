@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from core.sa.models import User, Book, BookUser
+from core.sa.models import User, Book, BookUser, Library
 
 class UserRepository:
     """Repository for managing User entities."""
@@ -276,32 +276,42 @@ class UserRepository:
         Returns:
             The updated or created BookUser object if successful, None otherwise
         """
-        # Get the book's work_id
-        book = self.session.query(Book).filter(Book.goodreads_id == goodreads_id).first()
-        if not book:
+        # Get the book's work_id from the library table
+        print(f"Looking for book with Goodreads ID: {goodreads_id}")
+        library_entry = (
+            self.session.query(Library)
+            .filter(Library.goodreads_id == goodreads_id)
+            .first()
+        )
+        if not library_entry:
+            print(f"Library entry not found with Goodreads ID: {goodreads_id}")
             return None
+
+        print(f"Found library entry: {library_entry.title} (work_id: {library_entry.work_id})")
 
         # Find existing book-user relationship or create new one
         book_user = (
             self.session.query(BookUser)
             .filter(
                 BookUser.user_id == user_id,
-                BookUser.work_id == book.work_id
+                BookUser.work_id == library_entry.work_id
             )
             .first()
         )
 
         if book_user:
+            print(f"Updating existing book status for user {user_id}")
             # Update existing relationship
             book_user.status = status
             book_user.source = source
             book_user.started_at = started_at
             book_user.finished_at = finished_at
         else:
+            print(f"Creating new book status for user {user_id}")
             # Create new relationship
             book_user = BookUser(
                 user_id=user_id,
-                work_id=book.work_id,
+                work_id=library_entry.work_id,
                 status=status,
                 source=source,
                 started_at=started_at,
@@ -309,5 +319,27 @@ class UserRepository:
             )
             self.session.add(book_user)
 
-        self.session.commit()
-        return book_user 
+        try:
+            self.session.commit()
+            print("Successfully committed changes")
+            return book_user
+        except Exception as e:
+            print(f"Error committing changes: {str(e)}")
+            self.session.rollback()
+            return None
+
+    def get_or_create_user(self, name: str) -> User:
+        """Get an existing user by name or create a new one.
+        
+        Args:
+            name: The name of the user
+            
+        Returns:
+            The existing or newly created User object
+        """
+        user = self.session.query(User).filter(User.name == name).first()
+        if not user:
+            user = User(name=name)
+            self.session.add(user)
+            self.session.commit()
+        return user 
