@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import books
-
 app = FastAPI(
     title="Goodreads Companion API",
     description="API for managing books, authors, and reading lists",
@@ -17,9 +15,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Include routers
-app.include_router(books.router, prefix="/api/v1")
 
 # Health check endpoint
 @app.get("/health")
