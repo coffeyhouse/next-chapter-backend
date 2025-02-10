@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from core.resolvers.book_resolver import BookResolver
-from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries
+from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library
 import sqlite3
 
 @click.group()
@@ -55,11 +55,25 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
         creator = BookCreator(session, scrape=scrape)
         resolver = BookResolver(scrape=scrape)
         
-        # Get existing Goodreads IDs from our database
-        existing_ids = set(
+        # Get existing IDs from Library table
+        existing_library_ids = set(
             id_tuple[0] for id_tuple in 
-            session.query(Book.goodreads_id).all()
+            session.query(Library.goodreads_id)
+            .filter(Library.goodreads_id.isnot(None))
+            .all()
         )
+        
+        # Get existing work IDs from Library table
+        existing_work_ids = set(
+            id_tuple[0] for id_tuple in 
+            session.query(Library.work_id)
+            .all()
+        )
+        
+        if verbose:
+            click.echo(click.style("\nFound existing library books:", fg='blue'))
+            click.echo(click.style(f"  - {len(existing_library_ids)} by Goodreads ID", fg='cyan'))
+            click.echo(click.style(f"  - {len(existing_work_ids)} by Work ID", fg='cyan'))
         
         # Get books from Calibre database
         with sqlite3.connect(calibre_path) as calibre_conn:
@@ -80,12 +94,20 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             """
             
             cursor = calibre_conn.execute(query)
-            books = cursor.fetchall()
+            calibre_books = cursor.fetchall()
             
-            # Filter out books that already exist
+            if verbose:
+                click.echo(click.style(f"\nFound {len(calibre_books)} total books in Calibre", fg='blue'))
+                if len(calibre_books) > 0:
+                    click.echo(click.style("First book:", fg='blue'))
+                    click.echo(click.style(f"  - Title: {calibre_books[0][1]}", fg='cyan'))
+                    click.echo(click.style(f"  - Goodreads ID: {calibre_books[0][2]}", fg='cyan'))
+                    click.echo(click.style(f"  - ISBN: {calibre_books[0][3]}", fg='cyan'))
+            
+            # Filter out books that already exist by Goodreads ID
             new_books = [
-                book for book in books 
-                if book[2] not in existing_ids
+                book for book in calibre_books 
+                if book[2] not in existing_library_ids
             ]
             
             if limit:
@@ -94,7 +116,15 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             if verbose:
                 click.echo(click.style(f"\nFound ", fg='blue') + 
                           click.style(f"{len(new_books)}", fg='cyan') + 
-                          click.style(" new books to import", fg='blue'))
+                          click.style(" new books to process", fg='blue'))
+                if len(new_books) > 0:
+                    click.echo(click.style("First new book:", fg='blue'))
+                    click.echo(click.style(f"  - Title: {new_books[0][1]}", fg='cyan'))
+                    click.echo(click.style(f"  - Goodreads ID: {new_books[0][2]}", fg='cyan'))
+                    click.echo(click.style(f"  - ISBN: {new_books[0][3]}", fg='cyan'))
+                click.echo(click.style("\nExisting IDs:", fg='blue'))
+                click.echo(click.style(f"  - Library IDs: {existing_library_ids}", fg='cyan'))
+                click.echo(click.style(f"  - Work IDs: {existing_work_ids}", fg='cyan'))
             
             processed = 0
             imported = 0
@@ -103,7 +133,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             # Disable other output during progress bar unless verbose
             with click.progressbar(
                 new_books,
-                label=click.style('Importing books', fg='blue'),
+                label=click.style('Processing books', fg='blue'),
                 item_show_func=lambda b: click.style(b[1], fg='cyan') if b and verbose else None,
                 show_eta=True,
                 show_percent=True,
@@ -119,22 +149,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                     }
                     
                     try:
-                        # First check if book exists by Goodreads ID
-                        existing_book = session.query(Book).filter_by(
-                            goodreads_id=calibre_data['goodreads_id']
-                        ).first()
-                        
-                        if existing_book:
-                            skipped.append({
-                                'title': calibre_data['title'],
-                                'goodreads_id': calibre_data['goodreads_id'],
-                                'reason': f"Book already exists with Goodreads ID (title: {existing_book.title})",
-                                'color': 'yellow'
-                            })
-                            processed += 1
-                            continue
-                            
-                        # Try to resolve the book data
+                        # Try to resolve the book data first to get work_id
                         book_data = resolver.resolve_book(calibre_data['goodreads_id'])
                         if not book_data:
                             skipped.append({
@@ -147,26 +162,31 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                             continue
                             
                         # Check if book exists by work_id
-                        if book_data.get('work_id'):
+                        if book_data.get('work_id') in existing_work_ids:
                             existing_book = session.query(Book).filter_by(
                                 work_id=book_data['work_id']
                             ).first()
-                            if existing_book:
-                                skipped.append({
-                                    'title': calibre_data['title'],
-                                    'goodreads_id': calibre_data['goodreads_id'],
-                                    'reason': f"Book already exists with work_id {book_data['work_id']} (title: {existing_book.title})",
-                                    'color': 'yellow'
-                                })
-                                processed += 1
-                                continue
+                            skipped.append({
+                                'title': calibre_data['title'],
+                                'goodreads_id': calibre_data['goodreads_id'],
+                                'reason': f"Book already exists with work_id {book_data['work_id']} (title: {existing_book.title})",
+                                'color': 'yellow'
+                            })
+                            processed += 1
+                            continue
                         
                         # Create the book using the resolved data
                         book_obj = creator.create_book(book_data)
                         if book_obj:
-                            # Update source and calibre_id
-                            book_obj.source = 'library'
-                            book_obj.calibre_id = calibre_data['calibre_id']
+                            # Create library entry
+                            library_entry = Library(
+                                title=calibre_data['title'],
+                                calibre_id=calibre_data['calibre_id'],
+                                goodreads_id=calibre_data['goodreads_id'],
+                                work_id=book_obj.work_id,
+                                isbn=calibre_data['isbn']
+                            )
+                            session.add(library_entry)
                             session.commit()
                             imported += 1
                         else:
@@ -263,13 +283,14 @@ def empty_db(force: bool):
     try:
         # Get counts before deletion
         counts = {
+            'library': session.query(Library).count(),
             'books': session.query(Book).count(),
             'authors': session.query(Author).count(),
             'genres': session.query(Genre).count(),
             'series': session.query(Series).count(),
             'book_authors': session.query(BookAuthor).count(),
             'book_genres': session.query(BookGenre).count(),
-            'book_series': session.query(BookSeries).count(),
+            'book_series': session.query(BookSeries).count()
         }
         
         total_records = sum(counts.values())
@@ -292,7 +313,7 @@ def empty_db(force: bool):
         # Delete in correct order to avoid foreign key constraints
         click.echo("\nDeleting records...")
         
-        with click.progressbar(length=7, label='Emptying database') as bar:
+        with click.progressbar(length=8, label='Emptying database') as bar:
             session.query(BookAuthor).delete()
             bar.update(1)
             
@@ -300,6 +321,9 @@ def empty_db(force: bool):
             bar.update(1)
             
             session.query(BookSeries).delete()
+            bar.update(1)
+            
+            session.query(Library).delete()
             bar.update(1)
             
             session.query(Book).delete()
