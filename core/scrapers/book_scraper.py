@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import json
 from datetime import datetime
+import click
 from ..utils.http import GoodreadsDownloader
 from ..utils.image import download_book_cover
 
@@ -54,12 +55,13 @@ class BookScraper:
             ]
         }
         """
-        print(f"Scraping book: {book_id}")
+        if click.get_current_context().find_root().params.get('verbose', False):
+            click.echo(click.style(f"Scraping book: {book_id}", fg='cyan'))
         
         # Get book page content
         url = self._get_book_url(book_id)
         if not self.downloader.download_url(url):
-            print(f"Failed to download book page for ID: {book_id}")
+            click.echo(click.style(f"Failed to download book page for ID: {book_id}", fg='red'), err=True)
             return None
             
         # Parse HTML
@@ -116,7 +118,7 @@ class BookScraper:
             return book_data
             
         except Exception as e:
-            print(f"Error parsing book data: {e}")
+            click.echo(click.style(f"Error parsing book data: {e}", fg='red'), err=True)
             return None
     
     def _get_book_url(self, book_id: str) -> str:
@@ -130,7 +132,7 @@ class BookScraper:
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"Error reading HTML file: {e}")
+            click.echo(click.style(f"Error reading HTML file: {e}", fg='red'), err=True)
             return None
     
     def _extract_title(self, soup) -> str:

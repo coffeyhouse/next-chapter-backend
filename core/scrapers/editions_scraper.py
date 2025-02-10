@@ -28,7 +28,6 @@ class EditionsScraper:
             }
         ]
         """
-        print(f"Scraping editions for work: {work_id}")
         
         # Get first page content
         url = self._get_page_url(work_id, 1)

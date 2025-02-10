@@ -28,7 +28,6 @@ class GoodreadsDownloader:
         
         # Check if file exists locally
         if local_path.exists():
-            print(f"Using cached file: {local_path}")
             return True
             
         # If file doesn't exist and scraping is disabled, skip

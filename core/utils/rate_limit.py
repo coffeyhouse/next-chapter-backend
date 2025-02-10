@@ -10,7 +10,7 @@ class RateLimiter:
     def __init__(self, 
                  min_delay: float = 0.2,
                  max_delay: float = 0.5,
-                 burst_size: int = 10,
+                 burst_size: int = 100,
                  min_burst_delay: float = 10.0,
                  max_burst_delay: float = 30.0):
         """
@@ -53,7 +53,7 @@ class RateLimiter:
                 # If we need to wait more
                 if time_since_last < delay:
                     wait_time = delay - time_since_last
-                    click.echo(f"Waiting {wait_time:.1f} seconds...")
+                    # click.echo(f"\nWaiting {wait_time:.1f} seconds...")
                     time.sleep(wait_time)
         
         self.request_count += 1

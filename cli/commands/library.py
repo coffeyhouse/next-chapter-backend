@@ -1,6 +1,12 @@
 # core/cli/commands/library.py
 import click
 from core.database import GoodreadsDB
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from core.resolvers.book_resolver import BookResolver
+from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries
+import sqlite3
 
 @click.group()
 def library():
@@ -20,6 +26,190 @@ def import_calibre(db_path: str, calibre_path: str, limit: int):
     
     click.echo(f"\nProcessed {total} books")
     click.echo(f"Successfully imported {imported} books")
+
+@library.command()
+@click.option('--calibre-path', default="C:/Users/warre/Calibre Library/metadata.db", required=True, help='Path to Calibre metadata.db')
+@click.option('--limit', default=None, type=int, help='Limit number of books')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool):
+    """Import books from Calibre library using SQLAlchemy
+    
+    This command uses the new SQLAlchemy-based BookCreator to import books from Calibre.
+    It will create book records with proper relationships for authors, genres, and series.
+    
+    Example:
+        cli library import-calibre-sa --calibre-path "path/to/metadata.db"
+        cli library import-calibre-sa --limit 10 --scrape  # Import 10 books with fresh data
+    """
+    if verbose:
+        click.echo(click.style("\nImporting from Calibre: ", fg='blue') + 
+                  click.style(calibre_path, fg='cyan'))
+    
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create book creator and resolver
+        creator = BookCreator(session, scrape=scrape)
+        resolver = BookResolver(scrape=scrape)
+        
+        # Get existing Goodreads IDs from our database
+        existing_ids = set(
+            id_tuple[0] for id_tuple in 
+            session.query(Book.goodreads_id).all()
+        )
+        
+        # Get books from Calibre database
+        with sqlite3.connect(calibre_path) as calibre_conn:
+            query = """
+                SELECT 
+                    books.id AS calibre_id,
+                    books.title,
+                    gr.val AS goodreads_id,
+                    isbn.val AS isbn
+                FROM books
+                LEFT JOIN identifiers gr 
+                    ON gr.book = books.id 
+                    AND gr.type = 'goodreads'
+                LEFT JOIN identifiers isbn
+                    ON isbn.book = books.id 
+                    AND isbn.type = 'isbn'
+                WHERE gr.val IS NOT NULL
+            """
+            
+            cursor = calibre_conn.execute(query)
+            books = cursor.fetchall()
+            
+            # Filter out books that already exist
+            new_books = [
+                book for book in books 
+                if book[2] not in existing_ids
+            ]
+            
+            if limit:
+                new_books = new_books[:limit]
+            
+            if verbose:
+                click.echo(click.style(f"\nFound ", fg='blue') + 
+                          click.style(f"{len(new_books)}", fg='cyan') + 
+                          click.style(" new books to import", fg='blue'))
+            
+            processed = 0
+            imported = 0
+            skipped = []
+            
+            # Disable other output during progress bar unless verbose
+            with click.progressbar(
+                new_books,
+                label=click.style('Importing books', fg='blue'),
+                item_show_func=lambda b: click.style(b[1], fg='cyan') if b and verbose else None,
+                show_eta=True,
+                show_percent=True,
+                width=50
+            ) as books_iter:
+                for book in books_iter:
+                    calibre_data = {
+                        'calibre_id': book[0],
+                        'title': book[1],
+                        'goodreads_id': book[2],
+                        'isbn': book[3],
+                        'source': 'library'
+                    }
+                    
+                    try:
+                        # First check if book exists by Goodreads ID
+                        existing_book = session.query(Book).filter_by(
+                            goodreads_id=calibre_data['goodreads_id']
+                        ).first()
+                        
+                        if existing_book:
+                            skipped.append({
+                                'title': calibre_data['title'],
+                                'goodreads_id': calibre_data['goodreads_id'],
+                                'reason': f"Book already exists with Goodreads ID (title: {existing_book.title})",
+                                'color': 'yellow'
+                            })
+                            processed += 1
+                            continue
+                            
+                        # Try to resolve the book data
+                        book_data = resolver.resolve_book(calibre_data['goodreads_id'])
+                        if not book_data:
+                            skipped.append({
+                                'title': calibre_data['title'],
+                                'goodreads_id': calibre_data['goodreads_id'],
+                                'reason': "Failed to resolve book data from Goodreads",
+                                'color': 'red'
+                            })
+                            processed += 1
+                            continue
+                            
+                        # Check if book exists by work_id
+                        if book_data.get('work_id'):
+                            existing_book = session.query(Book).filter_by(
+                                work_id=book_data['work_id']
+                            ).first()
+                            if existing_book:
+                                skipped.append({
+                                    'title': calibre_data['title'],
+                                    'goodreads_id': calibre_data['goodreads_id'],
+                                    'reason': f"Book already exists with work_id {book_data['work_id']} (title: {existing_book.title})",
+                                    'color': 'yellow'
+                                })
+                                processed += 1
+                                continue
+                        
+                        # Create the book using the resolved data
+                        book_obj = creator.create_book(book_data)
+                        if book_obj:
+                            # Update source and calibre_id
+                            book_obj.source = 'library'
+                            book_obj.calibre_id = calibre_data['calibre_id']
+                            session.commit()
+                            imported += 1
+                        else:
+                            skipped.append({
+                                'title': calibre_data['title'],
+                                'goodreads_id': calibre_data['goodreads_id'],
+                                'reason': "Failed to create book for unknown reason",
+                                'color': 'red'
+                            })
+                    except Exception as e:
+                        skipped.append({
+                            'title': calibre_data['title'],
+                            'goodreads_id': calibre_data['goodreads_id'],
+                            'reason': f"Error: {str(e)}",
+                            'color': 'red'
+                        })
+                    
+                    processed += 1
+            
+            # Print results
+            click.echo("\n" + click.style("Results:", fg='blue'))
+            click.echo(click.style("Processed: ", fg='blue') + 
+                      click.style(str(processed), fg='cyan') + 
+                      click.style(" books", fg='blue'))
+            click.echo(click.style("Imported: ", fg='blue') + 
+                      click.style(str(imported), fg='green') + 
+                      click.style(" books", fg='blue'))
+            
+            if skipped and verbose:
+                click.echo("\n" + click.style("Skipped books:", fg='yellow'))
+                for skip_info in skipped:
+                    click.echo("\n" + click.style(f"Title: {skip_info['title']}", fg=skip_info['color']))
+                    click.echo(click.style(f"Goodreads ID: {skip_info['goodreads_id']}", fg=skip_info['color']))
+                    click.echo(click.style(f"Reason: {skip_info['reason']}", fg=skip_info['color']))
+            elif skipped:
+                click.echo(click.style(f"\nSkipped {len(skipped)} books. ", fg='yellow') + 
+                          click.style("Use --verbose to see details.", fg='blue'))
+            
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during import: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
 
 @library.command()
 @click.option('--db-path', '--db', default="books.db", help='Path to books database')
@@ -54,3 +244,82 @@ def delete(goodreads_id: str, db_path: str, force: bool):
         click.echo(click.style(f"\nSuccessfully deleted '{book['title']}'", fg='green'))
     else:
         click.echo(click.style("\nFailed to delete book", fg='red'))
+
+@library.command()
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompts')
+def empty_db(force: bool):
+    """Empty the database of all records
+    
+    This will delete ALL records from ALL tables. Use with caution.
+    Requires confirmation unless --force is used.
+    
+    Example:
+        cli library empty-db  # Will prompt for confirmation
+        cli library empty-db --force  # No confirmation prompt
+    """
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get counts before deletion
+        counts = {
+            'books': session.query(Book).count(),
+            'authors': session.query(Author).count(),
+            'genres': session.query(Genre).count(),
+            'series': session.query(Series).count(),
+            'book_authors': session.query(BookAuthor).count(),
+            'book_genres': session.query(BookGenre).count(),
+            'book_series': session.query(BookSeries).count(),
+        }
+        
+        total_records = sum(counts.values())
+        
+        if total_records == 0:
+            click.echo("Database is already empty.")
+            return
+            
+        # Show what will be deleted
+        click.echo("\nThis will delete:")
+        for table, count in counts.items():
+            click.echo(f"  - {count} records from {table}")
+        click.echo(f"\nTotal: {total_records} records")
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to delete ALL records?", abort=True)
+            click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
+        
+        # Delete in correct order to avoid foreign key constraints
+        click.echo("\nDeleting records...")
+        
+        with click.progressbar(length=7, label='Emptying database') as bar:
+            session.query(BookAuthor).delete()
+            bar.update(1)
+            
+            session.query(BookGenre).delete()
+            bar.update(1)
+            
+            session.query(BookSeries).delete()
+            bar.update(1)
+            
+            session.query(Book).delete()
+            bar.update(1)
+            
+            session.query(Author).delete()
+            bar.update(1)
+            
+            session.query(Genre).delete()
+            bar.update(1)
+            
+            session.query(Series).delete()
+            bar.update(1)
+        
+        session.commit()
+        click.echo(click.style("\nSuccessfully emptied database", fg='green'))
+        
+    except Exception as e:
+        session.rollback()
+        click.echo(click.style(f"\nError emptying database: {str(e)}", fg='red'))
+        raise
+    finally:
+        session.close()
