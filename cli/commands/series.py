@@ -42,12 +42,13 @@ def sync(db_path: str, days: int, limit: int, source: str):
 def sync_sa(days: int, limit: int, source: str, scrape: bool, verbose: bool):
     """Sync unsynced series and import their books using SQLAlchemy
     
-    This command uses the new SQLAlchemy-based BookCreator to import books from series.
+    This command uses the SQLAlchemy-based BookCreator to import books from series.
     It will create book records with proper relationships for authors, genres, and series.
     
     Example:
         cli series sync-sa --days 7  # Sync series not updated in 7 days
         cli series sync-sa --limit 10 --scrape  # Sync 10 series with fresh data
+        cli series sync-sa --source library  # Only sync series with books from library
     """
     if verbose:
         click.echo(click.style("\nSyncing series not updated in ", fg='blue') + 
@@ -81,7 +82,6 @@ def sync_sa(days: int, limit: int, source: str, scrape: bool, verbose: bool):
         processed = 0
         imported = 0
         skipped = []
-        excluded = []
         
         # Process each series
         with click.progressbar(
@@ -108,7 +108,7 @@ def sync_sa(days: int, limit: int, source: str, scrape: bool, verbose: bool):
                     # Process each book in the series
                     for book_data in series_data['books']:
                         try:
-                            # First try to create the book to get full data
+                            # Create the book
                             book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='series')
                             if book:
                                 imported += 1

@@ -1,9 +1,9 @@
 # core/sa/repositories/author.py
 from typing import Optional, List
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
-from ..models import Author, Book
+from ..models import Author, Book, BookAuthor
 
 class AuthorRepository:
     def __init__(self, session: Session):
@@ -34,13 +34,27 @@ class AuthorRepository:
             Book.goodreads_id == book_id
         ).all()
 
-    def get_unsynced_authors(self, days_old: int = 30) -> List[Author]:
-        """Get authors not synced within specified days"""
+    def get_unsynced_authors(self, days_old: int = 30, source: Optional[str] = None) -> List[Author]:
+        """Get authors not synced within specified days, optionally filtered by book source
+        
+        Args:
+            days_old: Number of days since last sync
+            source: Optional source to filter by (e.g. 'library', 'series')
+            
+        Returns:
+            List of Author objects that need syncing
+        """
         cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
         query = self.session.query(Author).filter(
             (Author.last_synced_at.is_(None)) | 
             (Author.last_synced_at < cutoff_date)
-        ).order_by(Author.last_synced_at.asc().nullsfirst())
+        )
+        
+        # If source is specified, only include authors who have books from that source
+        if source:
+            query = query.join(BookAuthor).join(Book).filter(Book.source == source)
+            
+        query = query.order_by(Author.last_synced_at.asc().nullsfirst())
         
         authors = query.all()
         return [author for author in authors if author is not None]

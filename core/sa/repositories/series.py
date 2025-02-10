@@ -3,7 +3,7 @@
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 from core.sa.models import Series, Book, BookSeries
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from sqlalchemy import or_
 
 class SeriesRepository:
@@ -77,7 +77,7 @@ class SeriesRepository:
         Returns:
             List of Series objects that need updating
         """
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(UTC) - timedelta(days=days)
         query = self.session.query(Series).filter(
             or_(
                 Series.last_synced_at.is_(None),
@@ -85,8 +85,12 @@ class SeriesRepository:
             )
         )
         
+        # If source is specified, only include series that have books from that source
         if source:
             query = query.join(Series.book_series).join(BookSeries.book).filter(Book.source == source)
+            
+        # Order by last sync date, nulls first
+        query = query.order_by(Series.last_synced_at.asc().nullsfirst())
             
         if limit:
             query = query.limit(limit)
