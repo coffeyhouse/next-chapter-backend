@@ -25,5 +25,9 @@ cli.add_command(genre)
 cli.add_command(chain)
 cli.add_command(book)
 
-if __name__ == '__main__':
+def main():
+    """Entry point for the CLI"""
     cli()
+
+if __name__ == '__main__':
+    main()

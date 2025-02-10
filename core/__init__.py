@@ -1,0 +1,1 @@
+"""Core package for Calibre Companion""" 

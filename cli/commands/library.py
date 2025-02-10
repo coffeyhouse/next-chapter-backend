@@ -7,6 +7,7 @@ from core.resolvers.book_creator import BookCreator
 from core.resolvers.book_resolver import BookResolver
 from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
 import sqlite3
+from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
 
 @click.group()
 def library():
@@ -35,13 +36,14 @@ def import_calibre(db_path: str, calibre_path: str, limit: int):
 def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool):
     """Import books from Calibre library using SQLAlchemy
     
-    This command uses the new SQLAlchemy-based BookCreator to import books from Calibre.
+    This command uses the SQLAlchemy-based BookCreator to import books from Calibre.
     It will create book records with proper relationships for authors, genres, and series.
     
     Example:
         cli library import-calibre-sa --calibre-path "path/to/metadata.db"
         cli library import-calibre-sa --limit 10 --scrape  # Import 10 books with fresh data
     """
+    # Print initial sync information
     if verbose:
         click.echo(click.style("\nImporting from Calibre: ", fg='blue') + 
                   click.style(calibre_path, fg='cyan'))
@@ -53,6 +55,9 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
     try:
         # Create book creator
         creator = BookCreator(session, scrape=scrape)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
         
         # Get books from Calibre database
         with sqlite3.connect(calibre_path) as calibre_conn:
@@ -86,19 +91,9 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             if limit:
                 calibre_books = calibre_books[:limit]
             
-            processed = 0
-            imported = 0
-            skipped = []
-            
-            # Disable other output during progress bar unless verbose
-            with click.progressbar(
-                calibre_books,
-                label=click.style('Processing books', fg='blue'),
-                item_show_func=lambda b: click.style(b[1], fg='cyan') if b and verbose else None,
-                show_eta=True,
-                show_percent=True,
-                width=50
-            ) as books_iter:
+            # Process each book
+            with create_progress_bar(calibre_books, verbose, 'Processing books', 
+                                   lambda b: b[1]) as books_iter:
                 for book in books_iter:
                     calibre_data = {
                         'calibre_id': book[0],
@@ -121,43 +116,19 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                             )
                             session.add(library_entry)
                             session.commit()
-                            imported += 1
+                            tracker.increment_imported()
                         else:
-                            skipped.append({
-                                'title': calibre_data['title'],
-                                'goodreads_id': calibre_data['goodreads_id'],
-                                'reason': "Book already exists or was previously scraped",
-                                'color': 'yellow'
-                            })
+                            tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                           "Book already exists or was previously scraped")
                     except Exception as e:
-                        skipped.append({
-                            'title': calibre_data['title'],
-                            'goodreads_id': calibre_data['goodreads_id'],
-                            'reason': f"Error: {str(e)}",
-                            'color': 'red'
-                        })
+                        tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                       f"Error: {str(e)}", 'red')
                     
-                    processed += 1
+                    tracker.increment_processed()
             
             # Print results
-            click.echo("\n" + click.style("Results:", fg='blue'))
-            click.echo(click.style("Processed: ", fg='blue') + 
-                      click.style(str(processed), fg='cyan') + 
-                      click.style(" books", fg='blue'))
-            click.echo(click.style("Imported: ", fg='blue') + 
-                      click.style(str(imported), fg='green') + 
-                      click.style(" books", fg='blue'))
-            
-            if skipped and verbose:
-                click.echo("\n" + click.style("Skipped books:", fg='yellow'))
-                for skip_info in skipped:
-                    click.echo("\n" + click.style(f"Title: {skip_info['title']}", fg=skip_info['color']))
-                    click.echo(click.style(f"Goodreads ID: {skip_info['goodreads_id']}", fg=skip_info['color']))
-                    click.echo(click.style(f"Reason: {skip_info['reason']}", fg=skip_info['color']))
-            elif skipped:
-                click.echo(click.style(f"\nSkipped {len(skipped)} books. ", fg='yellow') + 
-                          click.style("Use --verbose to see details.", fg='blue'))
-
+            tracker.print_results('books')
+                      
     except Exception as e:
         click.echo("\n" + click.style(f"Error during import: {str(e)}", fg='red'), err=True)
         raise
@@ -223,7 +194,8 @@ def empty_db(force: bool):
             'series': session.query(Series).count(),
             'book_authors': session.query(BookAuthor).count(),
             'book_genres': session.query(BookGenre).count(),
-            'book_series': session.query(BookSeries).count()
+            'book_series': session.query(BookSeries).count(),
+            'book_scraped': session.query(BookScraped).count()
         }
         
         total_records = sum(counts.values())
@@ -246,10 +218,10 @@ def empty_db(force: bool):
         # Delete in correct order to avoid foreign key constraints
         click.echo("\nDeleting records...")
         
-        with click.progressbar(length=8, label='Emptying database') as bar:
+        with click.progressbar(length=9, label='Emptying database') as bar:
             session.query(BookAuthor).delete()
-            bar.update(1)
-            
+            bar.update(1)            
+
             session.query(BookGenre).delete()
             bar.update(1)
             
@@ -269,6 +241,9 @@ def empty_db(force: bool):
             bar.update(1)
             
             session.query(Series).delete()
+            bar.update(1)
+            
+            session.query(BookScraped).delete()
             bar.update(1)
         
         session.commit()
@@ -315,21 +290,15 @@ def delete_by_source(source: str, force: bool, verbose: bool):
             click.confirm("\nAre you sure you want to delete these books?", abort=True)
             click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
         
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
         # Get books to delete
         books = session.query(Book).filter(Book.source == source).all()
         
-        deleted = 0
-        skipped = []
-        
         # Process each book
-        with click.progressbar(
-            books,
-            label=click.style('Deleting books', fg='blue'),
-            item_show_func=lambda b: click.style(b.title, fg='cyan') if b and verbose else None,
-            show_eta=True,
-            show_percent=True,
-            width=50
-        ) as books_iter:
+        with create_progress_bar(books, verbose, 'Deleting books', 
+                               lambda b: b.title) as books_iter:
             for book in books_iter:
                 try:
                     # Delete relationships first
@@ -342,32 +311,15 @@ def delete_by_source(source: str, force: bool, verbose: bool):
                     # Delete the book
                     session.delete(book)
                     session.commit()
-                    deleted += 1
+                    tracker.increment_processed()
                     
                 except Exception as e:
-                    skipped.append({
-                        'title': book.title,
-                        'goodreads_id': book.goodreads_id,
-                        'reason': f"Error: {str(e)}",
-                        'color': 'red'
-                    })
+                    tracker.add_skipped(book.title, book.goodreads_id,
+                                   f"Error: {str(e)}", 'red')
                     session.rollback()
         
         # Print results
-        click.echo("\n" + click.style("Results:", fg='blue'))
-        click.echo(click.style("Deleted: ", fg='blue') + 
-                  click.style(str(deleted), fg='green') + 
-                  click.style(" books", fg='blue'))
-        
-        if skipped and verbose:
-            click.echo("\n" + click.style("Failed to delete:", fg='red'))
-            for skip_info in skipped:
-                click.echo("\n" + click.style(f"Title: {skip_info['title']}", fg=skip_info['color']))
-                click.echo(click.style(f"Goodreads ID: {skip_info['goodreads_id']}", fg=skip_info['color']))
-                click.echo(click.style(f"Reason: {skip_info['reason']}", fg=skip_info['color']))
-        elif skipped:
-            click.echo(click.style(f"\nFailed to delete {len(skipped)} books. ", fg='red') + 
-                      click.style("Use --verbose to see details.", fg='blue'))
+        tracker.print_results('books')
                       
     except Exception as e:
         click.echo("\n" + click.style(f"Error during deletion: {str(e)}", fg='red'), err=True)
