@@ -1,15 +1,17 @@
 from typing import Optional, Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
 from ..sa.repositories.book import BookRepository
-from ..sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries
-from ..scrapers.book_scraper import BookScraper
+from ..sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, BookScraped, Base
+from .book_resolver import BookResolver
 from datetime import datetime, UTC
 
 class BookCreator:
     def __init__(self, session: Session, scrape: bool = False):
         self.session = session
+        # Create tables if they don't exist
+        Base.metadata.create_all(session.get_bind())
         self.book_repository = BookRepository(session)
-        self.book_scraper = BookScraper(scrape)
+        self.resolver = BookResolver(scrape)
 
     def create_book_from_goodreads(self, goodreads_id: str) -> Optional[Book]:
         """
@@ -19,18 +21,33 @@ class BookCreator:
             goodreads_id: Goodreads ID of the book to scrape and create
             
         Returns:
-            Created Book object or None if book already exists
+            Created Book object or None if book already exists or was previously scraped
         """
                 
+        # Check if book has been scraped before
+        already_scraped = self.session.query(BookScraped).filter_by(
+            goodreads_id=goodreads_id
+        ).first()
+        if already_scraped:
+            return None
+
         # Check if book already exists by goodreads_id
         existing_book = self.book_repository.get_by_goodreads_id(goodreads_id)
         if existing_book:
             return None
 
-        # Scrape book data
-        book_data = self.book_scraper.scrape_book(goodreads_id)
-        if not book_data:
+        # Resolve book data
+        book_data = self.resolver.resolve_book(goodreads_id)
+        if not book_data:            
             return None
+
+        # Track successful scrape
+        scraped = BookScraped(
+            goodreads_id=goodreads_id,
+            work_id=book_data.get('work_id')
+        )
+        self.session.add(scraped)
+        self.session.commit()
 
         # Check if book exists by work_id
         work_id = book_data.get('work_id')

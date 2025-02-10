@@ -51,29 +51,8 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
     session = Session(db.engine)
     
     try:
-        # Create book creator and resolver
+        # Create book creator
         creator = BookCreator(session, scrape=scrape)
-        resolver = BookResolver(scrape=scrape)
-        
-        # Get existing IDs from Library table
-        existing_library_ids = set(
-            id_tuple[0] for id_tuple in 
-            session.query(Library.goodreads_id)
-            .filter(Library.goodreads_id.isnot(None))
-            .all()
-        )
-        
-        # Get existing work IDs from Library table
-        existing_work_ids = set(
-            id_tuple[0] for id_tuple in 
-            session.query(Library.work_id)
-            .all()
-        )
-        
-        if verbose:
-            click.echo(click.style("\nFound existing library books:", fg='blue'))
-            click.echo(click.style(f"  - {len(existing_library_ids)} by Goodreads ID", fg='cyan'))
-            click.echo(click.style(f"  - {len(existing_work_ids)} by Work ID", fg='cyan'))
         
         # Get books from Calibre database
         with sqlite3.connect(calibre_path) as calibre_conn:
@@ -104,27 +83,8 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                     click.echo(click.style(f"  - Goodreads ID: {calibre_books[0][2]}", fg='cyan'))
                     click.echo(click.style(f"  - ISBN: {calibre_books[0][3]}", fg='cyan'))
             
-            # Filter out books that already exist by Goodreads ID
-            new_books = [
-                book for book in calibre_books 
-                if book[2] not in existing_library_ids
-            ]
-            
             if limit:
-                new_books = new_books[:limit]
-            
-            if verbose:
-                click.echo(click.style(f"\nFound ", fg='blue') + 
-                          click.style(f"{len(new_books)}", fg='cyan') + 
-                          click.style(" new books to process", fg='blue'))
-                if len(new_books) > 0:
-                    click.echo(click.style("First new book:", fg='blue'))
-                    click.echo(click.style(f"  - Title: {new_books[0][1]}", fg='cyan'))
-                    click.echo(click.style(f"  - Goodreads ID: {new_books[0][2]}", fg='cyan'))
-                    click.echo(click.style(f"  - ISBN: {new_books[0][3]}", fg='cyan'))
-                click.echo(click.style("\nExisting IDs:", fg='blue'))
-                click.echo(click.style(f"  - Library IDs: {existing_library_ids}", fg='cyan'))
-                click.echo(click.style(f"  - Work IDs: {existing_work_ids}", fg='cyan'))
+                calibre_books = calibre_books[:limit]
             
             processed = 0
             imported = 0
@@ -132,7 +92,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             
             # Disable other output during progress bar unless verbose
             with click.progressbar(
-                new_books,
+                calibre_books,
                 label=click.style('Processing books', fg='blue'),
                 item_show_func=lambda b: click.style(b[1], fg='cyan') if b and verbose else None,
                 show_eta=True,
@@ -144,39 +104,12 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                         'calibre_id': book[0],
                         'title': book[1],
                         'goodreads_id': book[2],
-                        'isbn': book[3],
-                        'source': 'library'
+                        'isbn': book[3]
                     }
                     
                     try:
-                        # Try to resolve the book data first to get work_id
-                        book_data = resolver.resolve_book(calibre_data['goodreads_id'])
-                        if not book_data:
-                            skipped.append({
-                                'title': calibre_data['title'],
-                                'goodreads_id': calibre_data['goodreads_id'],
-                                'reason': "Failed to resolve book data from Goodreads",
-                                'color': 'red'
-                            })
-                            processed += 1
-                            continue
-                            
-                        # Check if book exists by work_id
-                        if book_data.get('work_id') in existing_work_ids:
-                            existing_book = session.query(Book).filter_by(
-                                work_id=book_data['work_id']
-                            ).first()
-                            skipped.append({
-                                'title': calibre_data['title'],
-                                'goodreads_id': calibre_data['goodreads_id'],
-                                'reason': f"Book already exists with work_id {book_data['work_id']} (title: {existing_book.title})",
-                                'color': 'yellow'
-                            })
-                            processed += 1
-                            continue
-                        
-                        # Create the book using the resolved data
-                        book_obj = creator.create_book(book_data)
+                        # Try to create the book
+                        book_obj = creator.create_book_from_goodreads(calibre_data['goodreads_id'])
                         if book_obj:
                             # Create library entry
                             library_entry = Library(
@@ -193,8 +126,8 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                             skipped.append({
                                 'title': calibre_data['title'],
                                 'goodreads_id': calibre_data['goodreads_id'],
-                                'reason': "Failed to create book for unknown reason",
-                                'color': 'red'
+                                'reason': "Book already exists or was previously scraped",
+                                'color': 'yellow'
                             })
                     except Exception as e:
                         skipped.append({
@@ -224,7 +157,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             elif skipped:
                 click.echo(click.style(f"\nSkipped {len(skipped)} books. ", fg='yellow') + 
                           click.style("Use --verbose to see details.", fg='blue'))
-            
+
     except Exception as e:
         click.echo("\n" + click.style(f"Error during import: {str(e)}", fg='red'), err=True)
         raise

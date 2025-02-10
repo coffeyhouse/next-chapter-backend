@@ -35,6 +35,13 @@ class BookSimilar(Base, TimestampMixin):
     book = relationship('Book', foreign_keys=[work_id], back_populates='similar_to')
     similar_book = relationship('Book', foreign_keys=[similar_work_id], back_populates='similar_books')
 
+class BookScraped(Base, TimestampMixin):
+    """Reference table for tracking which Goodreads IDs have been scraped and their work IDs"""
+    __tablename__ = 'book_scraped'
+
+    goodreads_id: Mapped[str] = mapped_column(String, primary_key=True)
+    work_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
 class Book(Base, TimestampMixin, LastSyncedMixin):
     __tablename__ = 'book'
 
