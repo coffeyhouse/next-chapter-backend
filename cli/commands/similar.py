@@ -6,7 +6,7 @@ from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from core.scrapers.similar_scraper import SimilarScraper
 from core.sa.repositories.book import BookRepository
-from core.sa.models import Book, BookSimilar
+from core.sa.models import Book, BookSimilar, BookScraped
 from ..utils import ProgressTracker, print_sync_start, create_progress_bar
 from datetime import datetime, UTC
 
@@ -88,14 +88,23 @@ def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: b
                     # Process each similar book
                     for i, similar_book_data in enumerate(similar_books, 1):
                         try:
-                            # Create the similar book if it doesn't exist
+                            # Try to create the similar book; if already scraped, it may return None
                             similar_book = creator.create_book_from_goodreads(
                                 similar_book_data['goodreads_id'], 
                                 source='similar'
                             )
+                            if similar_book is None:
+                                # Look up the scraped entry to get the work_id
+                                scraped = session.query(BookScraped).filter_by(
+                                    goodreads_id=similar_book_data['goodreads_id']
+                                ).first()
+                                if scraped and scraped.work_id:
+                                    # Look up the book record in the Book table
+                                    similar_book = book_repo.get_by_work_id(scraped.work_id)
                             
+                            # Only proceed if we found a valid Book record
                             if similar_book:
-                                # Create relationship if it doesn't exist
+                                # Create relationship if it doesn't already exist
                                 if not session.query(BookSimilar).filter_by(
                                     work_id=book.work_id,
                                     similar_work_id=similar_book.work_id
@@ -108,16 +117,28 @@ def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: b
                                     session.commit()
                                     similar_count += 1
                                     tracker.increment_imported()
+                            else:
+                                tracker.add_skipped(
+                                    similar_book_data.get('title', 'Unknown'),
+                                    similar_book_data.get('goodreads_id', 'Unknown'),
+                                    "No matching book found in Book table",
+                                    'red'
+                                )
                             
                             # Update progress for verbose mode
                             if verbose:
-                                click.echo(click.style(f"  {i}/{total_similar}: ", fg='blue') + 
-                                         click.style(similar_book_data.get('title', 'Unknown'), fg='cyan'))
+                                click.echo(
+                                    click.style(f"  {i}/{total_similar}: ", fg='blue') +
+                                    click.style(similar_book_data.get('title', 'Unknown'), fg='cyan')
+                                )
                             
                         except Exception as e:
-                            tracker.add_skipped(similar_book_data.get('title', 'Unknown'), 
-                                             similar_book_data.get('goodreads_id', 'Unknown'),
-                                             f"Error: {str(e)}", 'red')
+                            tracker.add_skipped(
+                                similar_book_data.get('title', 'Unknown'), 
+                                similar_book_data.get('goodreads_id', 'Unknown'),
+                                f"Error: {str(e)}", 
+                                'red'
+                            )
                     
                     if similar_count == 0:
                         tracker.add_skipped(book.title, book.goodreads_id,

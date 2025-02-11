@@ -30,7 +30,6 @@ class GoodreadsDownloader:
         
         # Check if file exists locally
         if local_path.exists():
-            print(f"Using cached file: {local_path}")
             return True
             
         # If file doesn't exist and scraping is disabled, skip
@@ -290,10 +289,10 @@ import click
 class RateLimiter:
     def __init__(self, 
                  min_delay: float = 0.2,
-                 max_delay: float = 0.5,
-                 burst_size: int = 10,
-                 min_burst_delay: float = 10.0,
-                 max_burst_delay: float = 30.0):
+                 max_delay: float = 0.3,
+                 burst_size: int = 150,
+                 min_burst_delay: float = 1.0,
+                 max_burst_delay: float = 3.0):
         """
         Initialize rate limiter with configurable delays.
         
@@ -334,7 +333,7 @@ class RateLimiter:
                 # If we need to wait more
                 if time_since_last < delay:
                     wait_time = delay - time_since_last
-                    click.echo(f"Waiting {wait_time:.1f} seconds...")
+                    # click.echo(f"\nWaiting {wait_time:.1f} seconds...")
                     time.sleep(wait_time)
         
         self.request_count += 1

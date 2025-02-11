@@ -5,6 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from core.sa.models import Base
+
 class Database:
     def __init__(self, db_path: str = "books.db"):
         """Initialize database connection
@@ -12,20 +14,17 @@ class Database:
         Args:
             db_path: Path to SQLite database file
         """
-        db_url = f"sqlite:///{db_path}"
-        
-        # Create engine with SQLite-specific configurations
         self.engine = create_engine(
-            db_url,
+            f"sqlite:///{db_path}",
             connect_args={"check_same_thread": False},  # Allow SQLite to be used across threads
-            echo=False  # Set to True to see SQL queries
+            poolclass=StaticPool
         )
         
         # Create sessionmaker
         self._SessionFactory = sessionmaker(
-            bind=self.engine,
             autocommit=False,
-            autoflush=False
+            autoflush=False,
+            bind=self.engine
         )
         
         # Store for thread-local session
@@ -59,8 +58,13 @@ class Database:
             
     def init_db(self) -> None:
         """Initialize database schema"""
-        from .models import Base
-        Base.metadata.create_all(bind=self.engine)
+        Base.metadata.create_all(self.engine)
+
+    def create_db_and_tables(self):
+        Base.metadata.create_all(self.engine)
+
+    def get_session(self) -> Session:
+        return self._SessionFactory()
 
 
 # Usage example:
@@ -76,13 +80,33 @@ if __name__ == "__main__":
         # Perform database operations
         pass
 
+# Create a database instance
+db = Database()
+
+# Dependency for FastAPI
+def get_db():
+    """Get a database session.
+    
+    This is a FastAPI dependency that will be used to get a database session
+    for each request. The session will be automatically closed when the request
+    is complete.
+    
+    Yields:
+        Session: A SQLAlchemy session
+    """
+    session = db.get_session()
+    try:
+        yield session
+    finally:
+        session.close()
+
 
 # core/sa/__init__.py
 from .database import Database
 from .models import (
     Base, Book, Author, Series, Genre,
-    Library, User, book_author, book_genre,
-    book_series, book_similar, book_user
+    Library, User, BookAuthor, BookGenre,
+    BookSeries, BookSimilar, BookUser
 )
 
 __all__ = [
@@ -94,10 +118,10 @@ __all__ = [
     'Genre',
     'Library',
     'User',
-    'book_author',
-    'book_genre',
-    'book_series',
-    'book_similar',
-    'book_user'
+    'BookAuthor',
+    'BookGenre',
+    'BookSeries',
+    'BookSimilar',
+    'BookUser'
 ]
 

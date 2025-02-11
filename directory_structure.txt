@@ -10,12 +10,23 @@
 +-- api/
 |   +-- routes/
 |   |-- books.py
+|   |-- users.py
+|   +-- schemas/
+|   |-- book.py
+|   |-- user.py
 |-- main.py
++-- calibre_companion.egg-info/
+|-- PKG-INFO
+|-- SOURCES.txt
+|-- dependency_links.txt
+|-- entry_points.txt
+|-- requires.txt
+|-- top_level.txt
 +-- cli/
 |   +-- commands/
-|   |-- __init__.py [empty]
+|   |-- __init__.py
 |   |-- author.py
-|   |-- book.py [empty]
+|   |-- book.py
 |   |-- chain.py
 |   |-- dev.py
 |   |-- genre.py
@@ -23,8 +34,9 @@
 |   |-- scraper.py
 |   |-- series.py
 |   |-- similar.py
-|-- __init__.py [empty]
+|-- __init__.py
 |-- main.py
+|-- utils.py
 +-- combined_files/
 |-- api-routes.txt
 |-- api.txt
@@ -54,6 +66,7 @@
 |   |-- __init__.py
 |   |-- book.py
 |   +-- resolvers/
+|   |-- book_creator.py
 |   |-- book_resolver.py
 |   +-- sa/
 |   |   +-- models/
@@ -69,6 +82,10 @@
 |   |   |-- __init__.py
 |   |   |-- author.py
 |   |   |-- book.py
+|   |   |-- genre.py
+|   |   |-- library.py
+|   |   |-- series.py
+|   |   |-- user.py
 |   |-- __init__.py
 |   |-- database.py
 |   +-- scrapers/
@@ -95,6 +112,7 @@
 |   |-- http.py
 |   |-- image.py
 |   |-- rate_limit.py
+|-- __init__.py
 |-- exclusions.py
 +-- data/
 |   +-- cache/
@@ -117,9 +135,17 @@
 |   |   +-- test_repositories/
 |   |   |-- test_author_repository.py
 |   |   |-- test_book_repository.py
+|   |   |-- test_genre_repository.py
+|   |   |-- test_library_repository.py
+|   |   |-- test_series_repository.py
+|   |   |-- test_user_repository.py
+|   |   +-- test_resolvers/
+|   |   |-- test_book_creator.py
+|   |   |-- test_book_creator_integration.py
 |   |-- README.md
 |   |-- __init__.py
 |   |-- conftest.py
+|   |-- explore_data.py
 |   |-- test_models.py
 |   |-- test_schema.py
 |   |-- utils.py

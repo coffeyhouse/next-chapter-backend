@@ -6,27 +6,43 @@ from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from core.resolvers.book_resolver import BookResolver
 from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
+from core.sa.repositories.user import UserRepository
+from core.database.queries import get_reading_progress
 import sqlite3
 from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+from datetime import datetime, UTC
+from typing import Dict, Any, List
+
+# Default Calibre database path
+DEFAULT_CALIBRE_PATH = "C:/Users/warre/Calibre Library/metadata.db"
+
+def print_reading_data(data: List[Dict[str, Any]]):
+    """Print reading data in a readable format."""
+    print("\nReading Progress Data:")
+    print("-" * 80)
+    for entry in data:
+        print(f"\nBook: {entry['title']} (Calibre ID: {entry['calibre_id']}, Goodreads ID: {entry['goodreads_id']})")
+        print("Warren:")
+        print(f"  Last Read: {entry['warren_last_read'] or 'Never'}")
+        print(f"  Progress: {entry['warren_read_percent']}%")
+        print("Ruth:")
+        print(f"  Last Read: {entry['ruth_last_read'] or 'Never'}")
+        print(f"  Progress: {entry['ruth_read_percent']}%")
+    print("-" * 80)
+
+def determine_status(read_percent: float) -> str:
+    """Determine reading status based on percentage."""
+    if read_percent is None or read_percent == 0:
+        return "want_to_read"
+    elif read_percent == 100:
+        return "completed"
+    else:
+        return "reading"
 
 @click.group()
 def library():
     """Library management commands"""
     pass
-
-@library.command()
-@click.option('--db-path', '--db', default="books.db", help='Path to books database')
-@click.option('--calibre-path', default="C:/Users/warre/Calibre Library/metadata.db", required=True, help='Path to Calibre metadata.db')
-@click.option('--limit', default=None, type=int, help='Limit number of books')
-def import_calibre(db_path: str, calibre_path: str, limit: int):
-    """Import books from Calibre library"""
-    click.echo(f"\nImporting from Calibre: {calibre_path}")
-    
-    db = GoodreadsDB(db_path)
-    total, imported = db.import_calibre_books(calibre_path, limit)
-    
-    click.echo(f"\nProcessed {total} books")
-    click.echo(f"Successfully imported {imported} books")
 
 @library.command()
 @click.option('--calibre-path', default="C:/Users/warre/Calibre Library/metadata.db", required=True, help='Path to Calibre metadata.db')
@@ -323,6 +339,206 @@ def delete_by_source(source: str, force: bool, verbose: bool):
                       
     except Exception as e:
         click.echo("\n" + click.style(f"Error during deletion: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+@library.command()
+@click.option('--calibre-path', type=click.Path(exists=True), default=DEFAULT_CALIBRE_PATH, help="Path to Calibre metadata.db (optional)")
+@click.option('--dry-run', is_flag=True, help="Print data without making changes")
+def sync_reading(calibre_path: str, dry_run: bool):
+    """Sync reading progress from Calibre database
+    
+    Example:
+        cli library sync-reading  # Sync with default Calibre path
+        cli library sync-reading --calibre-path "path/to/metadata.db"  # Use custom path
+        cli library sync-reading --dry-run  # Preview changes without applying them
+    """
+    # Get reading progress data
+    data = get_reading_progress(calibre_path)
+    
+    # Print the data
+    print_reading_data(data)
+    
+    if dry_run:
+        print("\nDry run - no changes made")
+        return
+        
+    # Initialize database
+    db = Database()
+    session: Session = db.get_session()
+    user_repo = UserRepository(session)
+    
+    try:
+        # Get or create users
+        warren = user_repo.get_or_create_user("Warren")
+        ruth = user_repo.get_or_create_user("Ruth")
+        
+        print(f"\nUsers:")
+        print(f"Warren (ID: {warren.id})")
+        print(f"Ruth (ID: {ruth.id})")
+        
+        # Process each book
+        total_processed = 0
+        warren_updates = 0
+        ruth_updates = 0
+        
+        for entry in data:
+            print(f"\nProcessing book: {entry['title']}")
+            
+            # Update Warren's status if there's progress
+            if entry['warren_read_percent'] > 0:
+                status = determine_status(entry['warren_read_percent'])
+                print(f"Warren's status: {status} ({entry['warren_read_percent']}%)")
+                result = user_repo.update_book_status(
+                    user_id=warren.id,
+                    goodreads_id=entry['goodreads_id'],
+                    status=status,
+                    source="calibre",
+                    started_at=None,  # We don't have this information
+                    finished_at=entry['warren_last_read'] if status == "completed" else None
+                )
+                if result:
+                    warren_updates += 1
+                    print("Warren's status updated")
+                else:
+                    print("Failed to update Warren's status")
+            
+            # Update Ruth's status if there's progress
+            if entry['ruth_read_percent'] > 0:
+                status = determine_status(entry['ruth_read_percent'])
+                print(f"Ruth's status: {status} ({entry['ruth_read_percent']}%)")
+                result = user_repo.update_book_status(
+                    user_id=ruth.id,
+                    goodreads_id=entry['goodreads_id'],
+                    status=status,
+                    source="calibre",
+                    started_at=None,  # We don't have this information
+                    finished_at=entry['ruth_last_read'] if status == "completed" else None
+                )
+                if result:
+                    ruth_updates += 1
+                    print("Ruth's status updated")
+                else:
+                    print("Failed to update Ruth's status")
+                    
+            total_processed += 1
+        
+        print(f"\nSync Results:")
+        print(f"Total books processed: {total_processed}")
+        print(f"Warren's updates: {warren_updates}")
+        print(f"Ruth's updates: {ruth_updates}")
+        
+    finally:
+        session.close()
+
+@library.command()
+@click.argument('table', type=click.Choice(['book', 'author', 'series', 'library', 'book-similar']))
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def reset_sync(table: str, force: bool, verbose: bool):
+    """Reset the sync date for all records in a table
+    
+    This will set last_synced_at (or similar_synced_at for book-similar) to NULL for all records,
+    causing them to be picked up by the next sync operation.
+    
+    Valid tables are:
+    - book: Reset last_synced_at for all books
+    - book-similar: Reset similar_synced_at for all books
+    - author: Reset sync dates for all authors
+    - series: Reset sync dates for all series
+    - library: Reset sync dates for all library entries
+    
+    Example:
+        cli library reset-sync series  # Reset series sync dates
+        cli library reset-sync book --force  # Reset book sync dates without confirmation
+        cli library reset-sync book-similar  # Reset similar book sync dates
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Special handling for book-similar which uses a different column
+        if table == 'book-similar':
+            # Get count of records to reset
+            count = session.query(Book).filter(
+                (Book.similar_synced_at.isnot(None)) | 
+                (Book.similar_synced_at == '')
+            ).count()
+            
+            if count == 0:
+                click.echo(click.style("\nNo books found with similar sync dates to reset", fg='yellow'))
+                return
+                
+            # Show what will be reset
+            click.echo("\n" + click.style(f"This will reset the similar sync date for {count} books", fg='yellow'))
+            
+            # Confirm unless force flag is used
+            if not force:
+                click.confirm("\nAre you sure you want to reset these similar sync dates?", abort=True)
+            
+            # Reset all similar sync dates in a single update
+            session.query(Book).filter(
+                (Book.similar_synced_at.isnot(None)) | 
+                (Book.similar_synced_at == '')
+            ).update({Book.similar_synced_at: None}, synchronize_session=False)
+            
+            # Commit the changes
+            session.commit()
+            
+            # Print results
+            click.echo("\n" + click.style("Results:", fg='blue'))
+            click.echo(click.style("Reset: ", fg='blue') + 
+                      click.style(str(count), fg='green') + 
+                      click.style(" book similar sync dates", fg='blue'))
+            return
+            
+        # Regular sync date handling for other tables
+        table_map = {
+            'book': Book,
+            'author': Author,
+            'series': Series,
+            'library': Library
+        }
+        
+        model = table_map[table]
+        
+        # Get count of records to reset - include both non-null and empty string values
+        count = session.query(model).filter(
+            (model.last_synced_at.isnot(None)) | 
+            (model.last_synced_at == '')
+        ).count()
+        
+        if count == 0:
+            click.echo(click.style(f"\nNo {table} records found with sync dates to reset", fg='yellow'))
+            return
+            
+        # Show what will be reset
+        click.echo("\n" + click.style(f"This will reset the sync date for {count} {table} records", fg='yellow'))
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to reset these sync dates?", abort=True)
+        
+        # Reset all sync dates in a single update
+        session.query(model).filter(
+            (model.last_synced_at.isnot(None)) | 
+            (model.last_synced_at == '')
+        ).update({model.last_synced_at: None}, synchronize_session=False)
+        
+        # Commit the changes
+        session.commit()
+        
+        # Print results
+        click.echo("\n" + click.style("Results:", fg='blue'))
+        click.echo(click.style("Reset: ", fg='blue') + 
+                  click.style(str(count), fg='green') + 
+                  click.style(f" {table} records", fg='blue'))
+                      
+    except Exception as e:
+        session.rollback()
+        click.echo("\n" + click.style(f"Error during reset: {str(e)}", fg='red'), err=True)
         raise
     finally:
         session.close()

@@ -89,3 +89,8 @@ def should_exclude_book(book: dict) -> bool:
     return get_exclusion_reason(book) is not None
 
 
+
+# core\__init__.py
+
+"""Core package for Calibre Companion""" 
+

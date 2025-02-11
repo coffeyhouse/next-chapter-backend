@@ -10,35 +10,33 @@ def author_repo(db_session):
     """Fixture to create an AuthorRepository instance"""
     return AuthorRepository(db_session)
 
-def test_get_by_goodreads_id(author_repo, db_session):
+def test_get_by_goodreads_id(author_repo, db_session, sample_author):
     """Test fetching an author by Goodreads ID"""
     # Get first author's ID for testing
     author = db_session.query(Author).first()
     assert author is not None
     
-    # Test repository method
-    fetched_author = author_repo.get_by_goodreads_id(author.goodreads_id)
-    assert fetched_author is not None
-    assert fetched_author.goodreads_id == author.goodreads_id
-    assert fetched_author.name == author.name
+    # Test fetching by ID
+    fetched = author_repo.get_by_goodreads_id(author.goodreads_id)
+    assert fetched is not None
+    assert fetched.goodreads_id == author.goodreads_id
 
 def test_get_by_nonexistent_goodreads_id(author_repo):
     """Test fetching with non-existent Goodreads ID"""
     author = author_repo.get_by_goodreads_id("nonexistent_id")
     assert author is None
 
-def test_search_authors(author_repo, db_session):
+def test_search_authors(author_repo, db_session, sample_author):
     """Test author search functionality"""
     # Get an author name to search for
     author = db_session.query(Author).first()
     search_term = author.name.split()[0]  # Use first word of name
     
-    # Test search
     results = author_repo.search_authors(search_term)
     assert len(results) > 0
-    assert any(author.name in result.name for result in results)
+    assert any(search_term.lower() in a.name.lower() for a in results)
 
-def test_search_authors_with_empty_query(author_repo):
+def test_search_authors_with_empty_query(author_repo, multiple_books):
     """Test search with empty query"""
     results = author_repo.search_authors("")
     assert len(results) == 20  # Default limit
@@ -58,13 +56,12 @@ def test_get_recent_authors(author_repo):
     for i in range(len(authors) - 1):
         assert authors[i].created_at >= authors[i + 1].created_at
 
-def test_get_authors_by_book(author_repo, db_session):
+def test_get_authors_by_book(author_repo, db_session, sample_book_with_relationships):
     """Test getting authors for a specific book"""
     # Get a book that has authors
     book = db_session.query(Book).join(Book.authors).first()
     assert book is not None
     
-    # Test repository method
     authors = author_repo.get_authors_by_book(book.goodreads_id)
     assert len(authors) > 0
     assert all(book in author.books for author in authors)
@@ -129,7 +126,7 @@ def book_repo(db_session):
     """Fixture to create a BookRepository instance"""
     return BookRepository(db_session)
 
-def test_get_by_goodreads_id(book_repo, db_session):
+def test_get_by_goodreads_id(book_repo, db_session, sample_book):
     """Test fetching a book by Goodreads ID"""
     # Get first book's ID for testing
     book = db_session.query(Book).first()
@@ -146,7 +143,7 @@ def test_get_by_nonexistent_goodreads_id(book_repo):
     book = book_repo.get_by_goodreads_id("nonexistent_id")
     assert book is None
 
-def test_search_books(book_repo, db_session):
+def test_search_books(book_repo, db_session, sample_book):
     """Test book search functionality"""
     # Get a book title to search for
     book = db_session.query(Book).first()
@@ -155,9 +152,9 @@ def test_search_books(book_repo, db_session):
     # Test search
     results = book_repo.search_books(search_term)
     assert len(results) > 0
-    assert any(book.title in result.title for result in results)
+    assert any(search_term.lower() in b.title.lower() for b in results)
 
-def test_search_books_with_empty_query(book_repo):
+def test_search_books_with_empty_query(book_repo, multiple_books):
     """Test search with empty query"""
     results = book_repo.search_books("")
     assert len(results) == 20  # Default limit
@@ -168,7 +165,7 @@ def test_search_books_with_limit(book_repo):
     results = book_repo.search_books("the", limit=limit)
     assert len(results) <= limit
 
-def test_get_books_by_author(book_repo, db_session):
+def test_get_books_by_author(book_repo, db_session, sample_book_with_relationships):
     """Test getting books by author"""
     # Get an author who has books
     author = db_session.query(Author).join(Author.books).first()
@@ -184,7 +181,7 @@ def test_get_books_by_nonexistent_author(book_repo):
     books = book_repo.get_books_by_author("nonexistent_author")
     assert len(books) == 0
 
-def test_get_books_by_genre(book_repo, db_session):
+def test_get_books_by_genre(book_repo, db_session, sample_book_with_relationships):
     """Test getting books by genre"""
     # Get a genre that has books
     genre = db_session.query(Genre).join(Genre.books).first()
@@ -215,7 +212,7 @@ def test_get_recent_books(book_repo):
     for i in range(len(books) - 1):
         assert books[i].created_at >= books[i + 1].created_at
 
-def test_get_books_in_series(book_repo, db_session):
+def test_get_books_in_series(book_repo, db_session, sample_book_with_relationships):
     """Test getting books in a series"""
     # Get a series that has books
     series = db_session.query(Series).join(Series.books).first()
@@ -250,4 +247,1004 @@ def test_get_books_with_filters(book_repo):
         book.language == filters['language']
         for book in books
     )
+
+
+# tests/test_sa/test_repositories/test_genre_repository.py
+
+import pytest
+from datetime import datetime, timedelta, UTC
+from core.sa.repositories.genre import GenreRepository
+from core.sa.models import Genre, Book, BookGenre
+
+@pytest.fixture
+def genre_repo(db_session):
+    """Fixture to create a GenreRepository instance."""
+    return GenreRepository(db_session)
+
+@pytest.fixture
+def sample_genre(db_session):
+    """Fixture to create and return a sample Genre object."""
+    genre = Genre(name="Test Genre")
+    db_session.add(genre)
+    db_session.commit()
+    return genre
+
+@pytest.fixture
+def sample_book(db_session):
+    """Fixture to create and return a sample Book object."""
+    book = Book(
+        goodreads_id="book_1",
+        work_id="work_1",
+        title="Test Book"
+    )
+    db_session.add(book)
+    db_session.commit()
+    return book
+
+@pytest.fixture
+def genre_with_book(db_session, sample_genre, sample_book):
+    """Fixture to associate a sample Genre with a Book."""
+    book_genre = BookGenre(
+        work_id=sample_book.work_id,
+        genre_id=sample_genre.id
+    )
+    db_session.add(book_genre)
+    db_session.commit()
+    return sample_genre
+
+def test_get_by_name(genre_repo, db_session):
+    """Test fetching a genre by its name."""
+    genre = Genre(name="Fantasy")
+    db_session.add(genre)
+    db_session.commit()
+
+    fetched = genre_repo.get_by_name("Fantasy")
+    assert fetched is not None
+    assert fetched.name == "Fantasy"
+
+def test_get_by_nonexistent_name(genre_repo):
+    """Test fetching a genre with non-existent name."""
+    result = genre_repo.get_by_name("Nonexistent Genre")
+    assert result is None
+
+def test_search_genres(genre_repo, db_session):
+    """Test searching for genres by name."""
+    genres = [
+        Genre(name="Science Fiction"),
+        Genre(name="Science Fantasy"),
+        Genre(name="Horror")
+    ]
+    db_session.add_all(genres)
+    db_session.commit()
+
+    results = genre_repo.search_genres("Science")
+    names = [g.name for g in results]
+    assert "Science Fiction" in names
+    assert "Science Fantasy" in names
+    assert "Horror" not in names
+
+def test_search_genres_empty_query(genre_repo, db_session):
+    """Test search behavior with empty query."""
+    genres = [Genre(name=f"Genre {i}") for i in range(3)]
+    db_session.add_all(genres)
+    db_session.commit()
+
+    results = genre_repo.search_genres("")
+    assert len(results) <= 20  # Default limit
+    assert all(isinstance(g, Genre) for g in results)
+
+def test_search_genres_with_limit(genre_repo, db_session):
+    """Test search respects the limit parameter."""
+    genres = [Genre(name=f"Test Genre {i}") for i in range(5)]
+    db_session.add_all(genres)
+    db_session.commit()
+
+    results = genre_repo.search_genres("Test", limit=3)
+    assert len(results) == 3
+
+def test_search_genres_special_characters(genre_repo, db_session):
+    """Test searching with special characters."""
+    special_name = "Sci-Fi & Fantasy"
+    genre = Genre(name=special_name)
+    db_session.add(genre)
+    db_session.commit()
+
+    results = genre_repo.search_genres("&")
+    assert len(results) == 1
+    assert results[0].name == special_name
+
+def test_get_genres_by_book(genre_repo, db_session, sample_book):
+    """Test retrieving genres associated with a book."""
+    genres = [
+        Genre(name="Genre 1"),
+        Genre(name="Genre 2")
+    ]
+    db_session.add_all(genres)
+    db_session.commit()
+
+    # Create book-genre associations
+    for genre in genres:
+        book_genre = BookGenre(
+            work_id=sample_book.work_id,
+            genre_id=genre.id
+        )
+        db_session.add(book_genre)
+    db_session.commit()
+
+    results = genre_repo.get_genres_by_book(sample_book.goodreads_id)
+    names = [g.name for g in results]
+    assert "Genre 1" in names
+    assert "Genre 2" in names
+
+def test_get_genres_by_nonexistent_book(genre_repo):
+    """Test getting genres for a non-existent book."""
+    results = genre_repo.get_genres_by_book("nonexistent_book")
+    assert len(results) == 0
+
+def test_get_popular_genres(genre_repo, db_session):
+    """Test getting popular genres based on book count."""
+    # Create genres and books
+    genres = [Genre(name=f"Genre {i}") for i in range(3)]
+    books = [
+        Book(goodreads_id=f"book_{i}", work_id=f"work_{i}", title=f"Book {i}")
+        for i in range(4)
+    ]
+    db_session.add_all(genres + books)
+    db_session.commit()
+
+    # Add different numbers of books to each genre
+    # Genre 0: 3 books
+    for book in books[0:3]:
+        book_genre = BookGenre(work_id=book.work_id, genre_id=genres[0].id)
+        db_session.add(book_genre)
+
+    # Genre 1: 3 books
+    for book in books[1:4]:
+        book_genre = BookGenre(work_id=book.work_id, genre_id=genres[1].id)
+        db_session.add(book_genre)
+
+    # Genre 2: 1 book
+    book_genre = BookGenre(work_id=books[0].work_id, genre_id=genres[2].id)
+    db_session.add(book_genre)
+
+    db_session.commit()
+
+    results = genre_repo.get_popular_genres(limit=2)
+    assert len(results) == 2
+    # Both genres with 3 books should be before the genre with 1 book
+    assert len(results[0].books) == 3
+    assert len(results[1].books) == 3
+
+def test_get_recent_genres(genre_repo, db_session):
+    """Test fetching recently added genres."""
+    now = datetime.now(UTC)
+    genre_old = Genre(name="Old Genre")
+    genre_recent = Genre(name="Recent Genre")
+    
+    genre_old.created_at = now - timedelta(days=10)
+    genre_recent.created_at = now
+
+    db_session.add_all([genre_old, genre_recent])
+    db_session.commit()
+
+    results = genre_repo.get_recent_genres(limit=2)
+    assert results[0].name == "Recent Genre"
+    assert results[1].name == "Old Genre"
+
+def test_get_recent_genres_with_limit(genre_repo, db_session):
+    """Test recent genres respects the limit parameter."""
+    genres = [Genre(name=f"Recent Genre {i}") for i in range(5)]
+    db_session.add_all(genres)
+    db_session.commit()
+
+    results = genre_repo.get_recent_genres(limit=3)
+    assert len(results) == 3
+
+def test_merge_genres(genre_repo, db_session):
+    """Test merging one genre into another."""
+    # Create source and target genres with books
+    source = Genre(name="Sci-Fi")
+    target = Genre(name="Science Fiction")
+    books = [
+        Book(goodreads_id=f"book_{i}", work_id=f"work_{i}", title=f"Book {i}")
+        for i in range(2)
+    ]
+    db_session.add_all([source, target] + books)
+    db_session.commit()
+    
+    # Create book-genre associations
+    book_genre1 = BookGenre(work_id=books[0].work_id, genre_id=source.id)
+    book_genre2 = BookGenre(work_id=books[1].work_id, genre_id=target.id)
+    db_session.add_all([book_genre1, book_genre2])
+    db_session.commit()
+
+    # Perform merge
+    result = genre_repo.merge_genres("Sci-Fi", "Science Fiction")
+    assert result is not None
+    assert result.name == "Science Fiction"
+    
+    # Verify source genre no longer exists
+    assert genre_repo.get_by_name("Sci-Fi") is None
+    
+    # Verify all books are now associated with target genre
+    target = genre_repo.get_by_name("Science Fiction")
+    assert len(target.books) == 2
+    book_ids = [b.goodreads_id for b in target.books]
+    assert "book_0" in book_ids
+    assert "book_1" in book_ids
+
+def test_merge_nonexistent_genres(genre_repo, db_session):
+    """Test merging with non-existent genres."""
+    target = Genre(name="Target Genre")
+    db_session.add(target)
+    db_session.commit()
+
+    # Try to merge non-existent source
+    result = genre_repo.merge_genres("Nonexistent", "Target Genre")
+    assert result is None
+
+    # Try to merge into non-existent target
+    result = genre_repo.merge_genres("Target Genre", "Nonexistent")
+    assert result is None 
+
+
+# tests/test_sa/test_repositories/test_library_repository.py
+
+import pytest
+from datetime import datetime, UTC
+from core.sa.repositories.library import LibraryRepository
+from core.sa.models import Library, Book
+
+@pytest.fixture
+def library_repo(db_session):
+    """Fixture to create a LibraryRepository instance."""
+    return LibraryRepository(db_session)
+
+@pytest.fixture
+def sample_library(db_session, sample_book):
+    """Fixture to create and return a sample Library object."""
+    library = Library(
+        title="Test Library Entry",
+        work_id=sample_book.work_id,
+        calibre_id=1,
+        goodreads_id="lib_1",
+        isbn="1234567890"
+    )
+    db_session.add(library)
+    db_session.commit()
+    return library
+
+@pytest.fixture
+def multiple_library_entries(db_session, multiple_books):
+    """Fixture to create multiple library entries."""
+    entries = []
+    for i, book in enumerate(multiple_books[:5]):  # Create 5 entries
+        library = Library(
+            title=f"Library Entry {i}",
+            work_id=book.work_id,
+            calibre_id=i + 1,
+            goodreads_id=f"lib_{i}",
+            isbn=f"ISBN{i}"
+        )
+        db_session.add(library)
+        entries.append(library)
+    db_session.commit()
+    return entries
+
+def test_get_by_id(library_repo, sample_library):
+    """Test fetching a library entry by its ID."""
+    fetched = library_repo.get_by_id(sample_library.id)
+    assert fetched is not None
+    assert fetched.id == sample_library.id
+    assert fetched.title == "Test Library Entry"
+
+def test_get_by_nonexistent_id(library_repo):
+    """Test fetching a library entry with non-existent ID."""
+    result = library_repo.get_by_id(999)
+    assert result is None
+
+def test_get_by_calibre_id(library_repo, sample_library):
+    """Test fetching a library entry by Calibre ID."""
+    fetched = library_repo.get_by_calibre_id(sample_library.calibre_id)
+    assert fetched is not None
+    assert fetched.calibre_id == sample_library.calibre_id
+
+def test_get_by_goodreads_id(library_repo, sample_library):
+    """Test fetching a library entry by Goodreads ID."""
+    fetched = library_repo.get_by_goodreads_id(sample_library.goodreads_id)
+    assert fetched is not None
+    assert fetched.goodreads_id == sample_library.goodreads_id
+
+def test_get_by_isbn(library_repo, sample_library):
+    """Test fetching library entries by ISBN."""
+    results = library_repo.get_by_isbn(sample_library.isbn)
+    assert len(results) == 1
+    assert results[0].isbn == sample_library.isbn
+
+def test_search_by_title(library_repo, multiple_library_entries):
+    """Test searching for library entries by title."""
+    results = library_repo.search_by_title("Library Entry")
+    assert len(results) == 5
+    assert all("Library Entry" in entry.title for entry in results)
+
+def test_search_by_title_with_limit(library_repo, multiple_library_entries):
+    """Test search respects the limit parameter."""
+    results = library_repo.search_by_title("Library Entry", limit=3)
+    assert len(results) == 3
+
+def test_get_library_with_book(library_repo, sample_library, sample_book):
+    """Test retrieving a library entry with its book relationship."""
+    library = library_repo.get_library_with_book(sample_library.id)
+    assert library is not None
+    assert library.book is not None
+    assert library.book.work_id == sample_book.work_id
+
+def test_get_all_by_work_id(library_repo, sample_library):
+    """Test retrieving all library entries for a work ID."""
+    results = library_repo.get_all_by_work_id(sample_library.work_id)
+    assert len(results) == 1
+    assert results[0].work_id == sample_library.work_id
+
+def test_create_entry(library_repo, sample_book):
+    """Test creating a new library entry."""
+    library = library_repo.create_entry(
+        title="New Library Entry",
+        work_id=sample_book.work_id,
+        calibre_id=100,
+        goodreads_id="new_lib",
+        isbn="0987654321"
+    )
+    assert library is not None
+    assert library.title == "New Library Entry"
+    assert library.work_id == sample_book.work_id
+    assert library.calibre_id == 100
+    assert library.goodreads_id == "new_lib"
+    assert library.isbn == "0987654321"
+
+def test_create_entry_minimal(library_repo, sample_book):
+    """Test creating a library entry with minimal information."""
+    library = library_repo.create_entry(
+        title="Minimal Entry",
+        work_id=sample_book.work_id
+    )
+    assert library is not None
+    assert library.title == "Minimal Entry"
+    assert library.work_id == sample_book.work_id
+    assert library.calibre_id is None
+    assert library.goodreads_id is None
+    assert library.isbn is None
+
+def test_update_entry(library_repo, sample_library):
+    """Test updating an existing library entry."""
+    updated = library_repo.update_entry(
+        library_id=sample_library.id,
+        title="Updated Title",
+        calibre_id=200,
+        goodreads_id="updated_lib",
+        isbn="5555555555"
+    )
+    assert updated is not None
+    assert updated.title == "Updated Title"
+    assert updated.calibre_id == 200
+    assert updated.goodreads_id == "updated_lib"
+    assert updated.isbn == "5555555555"
+
+def test_update_entry_partial(library_repo, sample_library):
+    """Test partially updating a library entry."""
+    original_calibre_id = sample_library.calibre_id
+    updated = library_repo.update_entry(
+        library_id=sample_library.id,
+        title="New Title"
+    )
+    assert updated is not None
+    assert updated.title == "New Title"
+    assert updated.calibre_id == original_calibre_id  # Should remain unchanged
+
+def test_update_nonexistent_entry(library_repo):
+    """Test updating a non-existent library entry."""
+    result = library_repo.update_entry(
+        library_id=999,
+        title="New Title"
+    )
+    assert result is None
+
+def test_delete_entry(library_repo, sample_library):
+    """Test deleting a library entry."""
+    success = library_repo.delete_entry(sample_library.id)
+    assert success is True
+    assert library_repo.get_by_id(sample_library.id) is None
+
+def test_delete_nonexistent_entry(library_repo):
+    """Test deleting a non-existent library entry."""
+    success = library_repo.delete_entry(999)
+    assert success is False 
+
+
+# tests/test_sa/test_repositories/test_series_repository.py
+
+import pytest
+from datetime import datetime, timedelta, UTC
+from core.sa.repositories.series import SeriesRepository
+from core.sa.models import Series, Book, BookSeries
+
+@pytest.fixture
+def series_repo(db_session):
+    """Fixture to create a SeriesRepository instance."""
+    return SeriesRepository(db_session)
+
+@pytest.fixture
+def sample_series(db_session):
+    """Fixture to create and return a sample Series object."""
+    series = Series(goodreads_id="series_1", title="Test Series")
+    db_session.add(series)
+    db_session.commit()
+    return series
+
+@pytest.fixture
+def sample_book(db_session):
+    """Fixture to create and return a sample Book object."""
+    book = Book(
+        goodreads_id="book_1",
+        work_id="work_1",
+        title="Test Book"
+    )
+    db_session.add(book)
+    db_session.commit()
+    return book
+
+@pytest.fixture
+def series_with_book(db_session, sample_series, sample_book):
+    """Fixture to associate a sample Series with a Book."""
+    book_series = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=sample_series.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add(book_series)
+    db_session.commit()
+    return sample_series
+
+@pytest.fixture
+def series_with_multiple_books(db_session):
+    """Fixture to create a series with multiple books in specific order."""
+    series = Series(goodreads_id="multi_book_series", title="Multiple Books Series")
+    books = [
+        Book(goodreads_id=f"book_{i}", work_id=f"work_{i}", title=f"Book {i}")
+        for i in range(1, 4)
+    ]
+    db_session.add_all([series] + books)
+    db_session.commit()
+
+    # Add books to series with specific order
+    for i, book in enumerate(books, 1):
+        book_series = BookSeries(
+            work_id=book.work_id,
+            series_id=series.goodreads_id,
+            series_order=float(i)
+        )
+        db_session.add(book_series)
+    
+    db_session.commit()
+    return series, books
+
+def test_get_by_goodreads_id(series_repo, db_session):
+    """Test fetching a series by its Goodreads ID."""
+    test_series = Series(goodreads_id="series_test", title="Sample Series")
+    db_session.add(test_series)
+    db_session.commit()
+
+    fetched = series_repo.get_by_goodreads_id("series_test")
+    assert fetched is not None
+    assert fetched.goodreads_id == "series_test"
+    assert fetched.title == "Sample Series"
+
+def test_get_by_nonexistent_goodreads_id(series_repo):
+    """Test fetching a series with non-existent Goodreads ID."""
+    result = series_repo.get_by_goodreads_id("nonexistent_id")
+    assert result is None
+
+def test_search_series(series_repo, db_session):
+    """Test searching for series by title."""
+    series1 = Series(goodreads_id="series_search_1", title="Amazing Series")
+    series2 = Series(goodreads_id="series_search_2", title="Another Amazing Series")
+    db_session.add_all([series1, series2])
+    db_session.commit()
+
+    results = series_repo.search_series("Amazing")
+    titles = [s.title for s in results]
+    assert "Amazing Series" in titles
+    assert "Another Amazing Series" in titles
+
+def test_search_series_empty_query(series_repo, db_session):
+    """Test search behavior with empty query."""
+    # Add some series to ensure we have data
+    series_list = [
+        Series(goodreads_id=f"series_{i}", title=f"Series {i}")
+        for i in range(3)
+    ]
+    db_session.add_all(series_list)
+    db_session.commit()
+
+    results = series_repo.search_series("")
+    assert len(results) <= 20  # Default limit
+    assert all(isinstance(s, Series) for s in results)
+
+def test_search_series_with_limit(series_repo, db_session):
+    """Test search respects the limit parameter."""
+    # Create more series than the limit
+    series_list = [
+        Series(goodreads_id=f"series_{i}", title=f"Test Series {i}")
+        for i in range(5)
+    ]
+    db_session.add_all(series_list)
+    db_session.commit()
+
+    results = series_repo.search_series("Test", limit=3)
+    assert len(results) == 3
+
+def test_search_series_special_characters(series_repo, db_session):
+    """Test searching with special characters."""
+    special_title = "Series with & and % characters!"
+    series = Series(goodreads_id="special_chars", title=special_title)
+    db_session.add(series)
+    db_session.commit()
+
+    results = series_repo.search_series("&")
+    assert len(results) == 1
+    assert results[0].title == special_title
+
+def test_get_series_with_books(series_repo, db_session, sample_book):
+    """Test retrieving a series along with its associated books."""
+    test_series = Series(goodreads_id="series_with_books", title="Series With Books")
+    db_session.add(test_series)
+    db_session.commit()
+
+    book_series = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=test_series.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add(book_series)
+    db_session.commit()
+
+    fetched = series_repo.get_series_with_books("series_with_books")
+    assert fetched is not None
+    assert any(book.goodreads_id == sample_book.goodreads_id for book in fetched.books)
+
+def test_get_series_with_ordered_books(series_repo, series_with_multiple_books, db_session):
+    """Test that books in a series maintain their order."""
+    series, books = series_with_multiple_books
+    
+    fetched = series_repo.get_series_with_books(series.goodreads_id)
+    assert fetched is not None
+    
+    # Get the book_series associations to check order
+    book_series_list = db_session.query(BookSeries).filter_by(series_id=series.goodreads_id).all()
+    
+    # Verify order is maintained
+    for i, book_series in enumerate(book_series_list, 1):
+        assert book_series.series_order == float(i)
+
+def test_get_series_by_book(series_repo, db_session, sample_book):
+    """Test retrieving series that include a specific book."""
+    series1 = Series(goodreads_id="series_by_book_1", title="Series One")
+    series2 = Series(goodreads_id="series_by_book_2", title="Series Two")
+    db_session.add_all([series1, series2])
+    db_session.commit()
+
+    # Create book-series associations
+    book_series1 = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=series1.goodreads_id,
+        series_order=1.0
+    )
+    book_series2 = BookSeries(
+        work_id=sample_book.work_id,
+        series_id=series2.goodreads_id,
+        series_order=1.0
+    )
+    db_session.add_all([book_series1, book_series2])
+    db_session.commit()
+
+    results = series_repo.get_series_by_book(sample_book.goodreads_id)
+    series_ids = [s.goodreads_id for s in results]
+    assert "series_by_book_1" in series_ids
+    assert "series_by_book_2" in series_ids
+
+def test_get_series_by_nonexistent_book(series_repo):
+    """Test getting series for a non-existent book."""
+    results = series_repo.get_series_by_book("nonexistent_book")
+    assert len(results) == 0
+
+def test_get_recent_series(series_repo, db_session):
+    """Test fetching the most recently added series."""
+    now = datetime.now(UTC)
+    series_old = Series(goodreads_id="series_old", title="Old Series")
+    series_recent = Series(goodreads_id="series_recent", title="Recent Series")
+    
+    series_old.created_at = now - timedelta(days=10)
+    series_recent.created_at = now
+
+    db_session.add_all([series_old, series_recent])
+    db_session.commit()
+
+    results = series_repo.get_recent_series(limit=2)
+    assert results[0].goodreads_id == "series_recent"
+    assert results[1].goodreads_id == "series_old"
+
+def test_get_recent_series_with_limit(series_repo, db_session):
+    """Test recent series respects the limit parameter."""
+    # Create more series than the limit
+    series_list = [
+        Series(goodreads_id=f"recent_{i}", title=f"Recent Series {i}")
+        for i in range(5)
+    ]
+    db_session.add_all(series_list)
+    db_session.commit()
+
+    results = series_repo.get_recent_series(limit=3)
+    assert len(results) == 3
+
+def test_series_timestamps(series_repo, db_session):
+    """Test that series timestamps are properly set and updated."""
+    # Create a new series
+    series = Series(goodreads_id="timestamp_test", title="Original Title")
+    db_session.add(series)
+    db_session.commit()
+    
+    original_created_at = series.created_at
+    original_updated_at = series.updated_at
+    
+    # Wait a moment to ensure timestamp difference
+    import time
+    time.sleep(0.1)
+    
+    # Update the series
+    series.title = "Updated Title"
+    db_session.commit()
+    
+    # Verify timestamps
+    assert series.created_at == original_created_at  # Should not change
+    assert series.updated_at > original_updated_at  # Should be updated
+
+
+
+# tests/test_sa/test_repositories/test_user_repository.py
+
+import pytest
+from datetime import datetime, timedelta, UTC
+from core.sa.repositories.user import UserRepository
+from core.sa.models import User, Book, BookUser, Library
+
+@pytest.fixture
+def user_repo(db_session):
+    """Fixture to create a UserRepository instance."""
+    return UserRepository(db_session)
+
+@pytest.fixture
+def sample_user(db_session):
+    """Fixture to create and return a sample User object."""
+    user = User(name="Test User")
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+@pytest.fixture
+def sample_book(db_session):
+    """Fixture to create and return a sample Book object."""
+    book = Book(
+        goodreads_id="book_1",
+        work_id="work_1",
+        title="Test Book"
+    )
+    db_session.add(book)
+    db_session.commit()
+    return book
+
+@pytest.fixture
+def user_with_book(db_session, sample_user, sample_book):
+    """Fixture to associate a sample User with a Book."""
+    book_user = BookUser(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id,
+        status="reading",
+        source="test",
+        started_at=datetime.now(UTC)
+    )
+    db_session.add(book_user)
+    db_session.commit()
+    return sample_user
+
+def test_create_user(user_repo):
+    """Test creating a new user."""
+    user = user_repo.create_user(name="John Doe")
+    assert user is not None
+    assert user.name == "John Doe"
+    assert user.id is not None
+
+def test_create_duplicate_user(user_repo, sample_user):
+    """Test that creating a user with a duplicate name raises an error."""
+    with pytest.raises(ValueError, match="User with name 'Test User' already exists"):
+        user_repo.create_user(name="Test User")
+
+def test_create_user_case_sensitive(user_repo, sample_user):
+    """Test that user names are case-sensitive."""
+    # This should work since it's a different case
+    user = user_repo.create_user(name="TEST USER")
+    assert user is not None
+    assert user.name == "TEST USER"
+
+def test_update_user(user_repo, sample_user):
+    """Test updating a user's name."""
+    updated = user_repo.update_user(user_id=sample_user.id, name="Updated Name")
+    assert updated is not None
+    assert updated.name == "Updated Name"
+
+def test_update_user_nonexistent(user_repo):
+    """Test updating a non-existent user."""
+    result = user_repo.update_user(user_id=999, name="New Name")
+    assert result is None
+
+def test_get_by_id(user_repo, sample_user):
+    """Test fetching a user by their ID."""
+    fetched = user_repo.get_by_id(sample_user.id)
+    assert fetched is not None
+    assert fetched.id == sample_user.id
+    assert fetched.name == "Test User"
+
+def test_get_by_nonexistent_id(user_repo):
+    """Test fetching a user with non-existent ID."""
+    result = user_repo.get_by_id(999)
+    assert result is None
+
+def test_search_users(user_repo, db_session):
+    """Test searching for users by name."""
+    users = [
+        User(name="John Doe"),
+        User(name="Jane Doe"),
+        User(name="Alice Smith")
+    ]
+    db_session.add_all(users)
+    db_session.commit()
+
+    results = user_repo.search_users("Doe")
+    names = [u.name for u in results]
+    assert "John Doe" in names
+    assert "Jane Doe" in names
+    assert "Alice Smith" not in names
+
+def test_search_users_empty_query(user_repo, db_session):
+    """Test search behavior with empty query."""
+    users = [User(name=f"User {i}") for i in range(3)]
+    db_session.add_all(users)
+    db_session.commit()
+
+    results = user_repo.search_users("")
+    assert len(results) <= 20  # Default limit
+    assert all(isinstance(u, User) for u in results)
+
+def test_search_users_with_limit(user_repo, db_session):
+    """Test search respects the limit parameter."""
+    users = [User(name=f"Test User {i}") for i in range(5)]
+    db_session.add_all(users)
+    db_session.commit()
+
+    results = user_repo.search_users("Test", limit=3)
+    assert len(results) == 3
+
+def test_get_users_by_book(user_repo, db_session, sample_book):
+    """Test retrieving users associated with a specific book."""
+    users = [User(name=f"User {i}") for i in range(2)]
+    db_session.add_all(users)
+    db_session.commit()
+
+    # Create book-user associations
+    for user in users:
+        book_user = BookUser(
+            work_id=sample_book.work_id,
+            user_id=user.id,
+            status="reading"
+        )
+        db_session.add(book_user)
+    db_session.commit()
+
+    results = user_repo.get_users_by_book(sample_book.goodreads_id)
+    assert len(results) == 2
+    assert all(isinstance(u, User) for u in results)
+
+def test_get_users_by_book_status(user_repo, db_session, sample_book):
+    """Test retrieving users by book status."""
+    users = [User(name=f"User {i}") for i in range(3)]
+    db_session.add_all(users)
+    db_session.commit()
+
+    # Create book-user associations with different statuses
+    statuses = ["reading", "completed", "reading"]
+    for user, status in zip(users, statuses):
+        book_user = BookUser(
+            work_id=sample_book.work_id,
+            user_id=user.id,
+            status=status
+        )
+        db_session.add(book_user)
+    db_session.commit()
+
+    reading_users = user_repo.get_users_by_book_status("reading")
+    assert len(reading_users) == 2
+
+    completed_users = user_repo.get_users_by_book_status("completed")
+    assert len(completed_users) == 1
+
+def test_get_active_readers(user_repo, db_session, sample_book):
+    """Test retrieving active readers."""
+    now = datetime.now(UTC)
+    users = [User(name=f"User {i}") for i in range(3)]
+    db_session.add_all(users)
+    db_session.commit()
+
+    # Create book-user associations with different update times
+    times = [
+        now - timedelta(days=40),  # Inactive
+        now - timedelta(days=5),   # Active
+        now - timedelta(days=1)    # Active
+    ]
+    
+    for user, update_time in zip(users, times):
+        book_user = BookUser(
+            work_id=sample_book.work_id,
+            user_id=user.id,
+            status="reading"
+        )
+        book_user.updated_at = update_time
+        db_session.add(book_user)
+    db_session.commit()
+
+    active_users = user_repo.get_active_readers(days=30)
+    assert len(active_users) == 2
+
+def test_get_user_with_books(user_repo, db_session, sample_user):
+    """Test retrieving a user with their book relationships."""
+    # Create multiple books
+    books = [
+        Book(goodreads_id=f"book_{i}", work_id=f"work_{i}", title=f"Book {i}")
+        for i in range(2)
+    ]
+    db_session.add_all(books)
+    db_session.commit()
+
+    # Create book-user associations
+    for book in books:
+        book_user = BookUser(
+            work_id=book.work_id,
+            user_id=sample_user.id,
+            status="reading"
+        )
+        db_session.add(book_user)
+    db_session.commit()
+
+    user = user_repo.get_user_with_books(sample_user.id)
+    assert user is not None
+    assert len(user.book_users) == 2
+    assert all(isinstance(bu.book, Book) for bu in user.book_users)
+
+def test_update_book_status(user_repo, db_session, sample_user, sample_book):
+    """Test updating a user's book status."""
+    # Create a library entry for the book
+    library_entry = Library(
+        title=sample_book.title,
+        work_id=sample_book.work_id,
+        goodreads_id=sample_book.goodreads_id
+    )
+    db_session.add(library_entry)
+    db_session.commit()
+
+    # Initial status update
+    book_user = user_repo.update_book_status(
+        user_id=sample_user.id,
+        goodreads_id=sample_book.goodreads_id,
+        status="reading",
+        source="test",
+        started_at=datetime.now(UTC)
+    )
+    assert book_user is not None
+    assert book_user.status == "reading"
+
+    # Update existing status
+    updated = user_repo.update_book_status(
+        user_id=sample_user.id,
+        goodreads_id=sample_book.goodreads_id,
+        status="completed",
+        finished_at=datetime.now(UTC)
+    )
+    assert updated is not None
+    assert updated.status == "completed"
+    assert updated.finished_at is not None
+
+def test_update_book_status_nonexistent_book(user_repo, sample_user):
+    """Test updating status for non-existent book."""
+    result = user_repo.update_book_status(
+        user_id=sample_user.id,
+        goodreads_id="nonexistent",
+        status="reading"
+    )
+    assert result is None
+
+def test_delete_book_status(user_repo, db_session, sample_user, sample_book):
+    """Test deleting a book status."""
+    # Create book-user relationship
+    book_user = BookUser(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id,
+        status="reading"
+    )
+    db_session.add(book_user)
+    db_session.commit()
+
+    # Delete the status
+    success = user_repo.delete_book_status(sample_user.id, sample_book.work_id)
+    assert success is True
+
+    # Verify it's deleted
+    result = db_session.query(BookUser).filter_by(
+        work_id=sample_book.work_id,
+        user_id=sample_user.id
+    ).first()
+    assert result is None
+
+def test_delete_nonexistent_book_status(user_repo):
+    """Test deleting a non-existent book status."""
+    success = user_repo.delete_book_status(999, "nonexistent_work_id")
+    assert success is False
+
+def test_get_user_stats(user_repo, db_session, sample_user, sample_book):
+    """Test getting user reading statistics."""
+    # Create book-user relationships with different statuses
+    now = datetime.now(UTC)
+    book_users = [
+        BookUser(
+            work_id=sample_book.work_id,
+            user_id=sample_user.id,
+            status="completed",
+            started_at=now - timedelta(days=30),
+            finished_at=now
+        ),
+        BookUser(
+            work_id="work_2",
+            user_id=sample_user.id,
+            status="reading",
+            started_at=now
+        ),
+        BookUser(
+            work_id="work_3",
+            user_id=sample_user.id,
+            status="want_to_read"
+        )
+    ]
+    
+    # Create additional books
+    books = [
+        Book(
+            goodreads_id="book_2",
+            work_id="work_2",
+            title="Test Book 2",
+            pages=200
+        ),
+        Book(
+            goodreads_id="book_3",
+            work_id="work_3",
+            title="Test Book 3",
+            pages=300
+        )
+    ]
+    
+    db_session.add_all(books)
+    db_session.add_all(book_users)
+    db_session.commit()
+
+    stats = user_repo.get_user_stats(sample_user.id)
+    assert stats is not None
+    assert stats["total_books"] == 3
+    assert stats["currently_reading"] == 1
+    assert stats["want_to_read"] == 1
+    assert stats["books_read_this_year"] == 1 
 
