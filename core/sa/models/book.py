@@ -40,7 +40,8 @@ class BookScraped(Base, TimestampMixin):
     __tablename__ = 'book_scraped'
 
     goodreads_id: Mapped[str] = mapped_column(String, primary_key=True)
-    work_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    work_id: Mapped[str | None] = mapped_column(ForeignKey('book.work_id'), nullable=True)
+    book = relationship('Book', back_populates='book_scraped', foreign_keys=[work_id])
 
 class Book(Base, TimestampMixin, LastSyncedMixin):
     __tablename__ = 'book'
@@ -66,10 +67,12 @@ class Book(Base, TimestampMixin, LastSyncedMixin):
     book_authors = relationship('BookAuthor', back_populates='book')
     book_genres = relationship('BookGenre', back_populates='book')
     book_users = relationship('BookUser', back_populates='book')
+    book_wanted = relationship('BookWanted', back_populates='book')
     book_series = relationship('BookSeries', back_populates='book')
     library_entries = relationship('Library', back_populates='book')
     similar_to = relationship('BookSimilar', foreign_keys=[BookSimilar.work_id], back_populates='book')
     similar_books = relationship('BookSimilar', foreign_keys=[BookSimilar.similar_work_id], back_populates='similar_book')
+    book_scraped = relationship('BookScraped', back_populates='book')
 
     # Convenience relationships
     authors = relationship('Author', secondary='book_author', viewonly=True)

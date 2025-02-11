@@ -1,7 +1,8 @@
 # core/sa/models/series.py
-from sqlalchemy import String, Float, ForeignKey
+from sqlalchemy import String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .base import Base, TimestampMixin, LastSyncedMixin
+from datetime import datetime, UTC
 
 class BookSeries(Base, TimestampMixin):
     """Association model for books in series"""
@@ -20,9 +21,12 @@ class Series(Base, TimestampMixin, LastSyncedMixin):
 
     goodreads_id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     book_series = relationship('BookSeries', back_populates='series')
     
     # Convenience relationship
     books = relationship('Book', secondary='book_series', viewonly=True)
+    user_subscriptions = relationship('UserSeriesSubscription', back_populates='series')

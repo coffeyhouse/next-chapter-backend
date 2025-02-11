@@ -1,9 +1,9 @@
 from typing import List, Optional
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries
+from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries, BookSimilar, Series, BookWanted, UserAuthorSubscription, UserSeriesSubscription, Author
 
 class UserRepository:
     """Repository for managing User entities."""
@@ -402,4 +402,858 @@ class UserRepository:
                 BookUser.status.in_(statuses)
             ))
             .count()
+        )
+
+    def get_similar_books_for_user_reads(
+        self,
+        user_id: int,
+        min_count: int = 1,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[Book, int]]:
+        """Get books that are marked as similar to the user's read books.
+        
+        Args:
+            user_id: The ID of the user
+            min_count: Minimum number of times a book should appear as similar
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (Book, count) where count is the number of times
+            the book appears as similar to the user's read books
+        """
+        # First get all the books the user has read
+        read_books = (
+            self.session.query(Book.work_id)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed"
+            )
+        )
+        
+        # Then get similar books for those read books with their counts
+        similar_books = (
+            self.session.query(Book, func.count(Book.work_id).label('similar_count'))
+            .join(BookSimilar, BookSimilar.similar_work_id == Book.work_id)
+            .filter(BookSimilar.work_id.in_(read_books))
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series)
+            )
+            .group_by(Book)
+            .having(func.count(Book.work_id) >= min_count)
+            .order_by(desc('similar_count'))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        
+        return similar_books
+
+    def count_similar_books_for_user_reads(
+        self,
+        user_id: int,
+        min_count: int = 1
+    ) -> int:
+        """Count books that are marked as similar to the user's read books.
+        
+        Args:
+            user_id: The ID of the user
+            min_count: Minimum number of times a book should appear as similar
+            
+        Returns:
+            Total count of similar books meeting the minimum count criteria
+        """
+        # First get all the books the user has read
+        read_books = (
+            self.session.query(Book.work_id)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed"
+            )
+        )
+        
+        # Then count similar books meeting the minimum count criteria
+        return (
+            self.session.query(func.count(func.distinct(Book.work_id)))
+            .select_from(Book)
+            .join(BookSimilar, BookSimilar.similar_work_id == Book.work_id)
+            .filter(BookSimilar.work_id.in_(read_books))
+            .group_by(Book.work_id)
+            .having(func.count(Book.work_id) >= min_count)
+            .count()
+        )
+
+    def get_user_read_genre_counts(self, user_id: int) -> List[tuple[str, int, List[Book]]]:
+        """Get counts of genres from books the user has read, along with top unread books per genre.
+        
+        Args:
+            user_id: The ID of the user
+            
+        Returns:
+            List of tuples containing (genre_name, count, top_unread_books) ordered by count descending
+        """
+        # Get all completed books for the user with their genres
+        read_books = (
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed"
+            )
+            .options(joinedload(Book.genres))
+            .all()
+        )
+        print(f"Found {len(read_books)} read books for user {user_id}")
+        
+        # Get work_ids of all books the user has any status for (to exclude from unread)
+        user_book_work_ids = set(
+            book.work_id for book in
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(BookUser.user_id == user_id)
+            .all()
+        )
+        print(f"User has {len(user_book_work_ids)} total books with any status")
+        
+        # Count genres and track books per genre
+        genre_map = {}  # name -> count
+        genre_books = {}  # name -> set of read book work_ids
+        
+        for book in read_books:
+            for genre in book.genres:
+                genre_map[genre.name] = genre_map.get(genre.name, 0) + 1
+                if genre.name not in genre_books:
+                    genre_books[genre.name] = set()
+                genre_books[genre.name].add(book.work_id)
+        
+        print(f"Found {len(genre_map)} unique genres")
+        
+        # For each genre, get top 3 unread books by votes
+        result = []
+        for genre_name, count in sorted(genre_map.items(), key=lambda x: (-x[1], x[0])):
+            print(f"\nProcessing genre: {genre_name} (count: {count})")
+            
+            # Get top 3 unread books for this genre
+            top_unread = (
+                self.session.query(Book)
+                .join(Book.genres)
+                .filter(
+                    Book.genres.any(name=genre_name),
+                    ~Book.work_id.in_(user_book_work_ids)
+                )
+                .options(
+                    joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                    joinedload(Book.book_series).joinedload(BookSeries.series)
+                )
+                .order_by(
+                    desc(Book.goodreads_votes),
+                    desc(Book.goodreads_rating)
+                )
+                .distinct()  # Ensure we don't get duplicates
+                .limit(10)  # Get top 10 books
+                .all()
+            )
+            print(f"Found {len(top_unread)} unread books for genre {genre_name}")
+            for book in top_unread:
+                print(f"  - {book.title} (votes: {book.goodreads_votes})")
+            
+            result.append((genre_name, count, top_unread))
+        
+        return result
+
+    def get_recommended_books(
+        self,
+        user_id: int,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[Book, int, List[tuple[str, int]]]]:
+        """Get book recommendations based on user's genre preferences.
+        
+        For each unread book, calculates a score based on the user's genre reading history.
+        The score is the sum of how many times the user has read books in each of the book's genres.
+        'Audiobook' genre is excluded from all calculations.
+        
+        Args:
+            user_id: The ID of the user
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (Book, total_score, list of (genre_name, genre_score))
+            ordered by total_score descending
+        """
+        # First get genre counts from user's read books
+        read_books = (
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed"
+            )
+            .options(joinedload(Book.genres))
+            .all()
+        )
+        
+        # Count genres (excluding Audiobook)
+        genre_weights = {}
+        for book in read_books:
+            for genre in book.genres:
+                if genre.name != "Audiobook":  # Skip Audiobook genre
+                    genre_weights[genre.name] = genre_weights.get(genre.name, 0) + 1
+                
+        # Get work_ids of all books the user has any status for (to exclude)
+        user_book_work_ids = set(
+            book.work_id for book in
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(BookUser.user_id == user_id)
+            .all()
+        )
+        
+        # Get all unread books with their genres
+        unread_books = (
+            self.session.query(Book)
+            .filter(~Book.work_id.in_(user_book_work_ids))
+            .options(
+                joinedload(Book.genres),
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series)
+            )
+            .all()
+        )
+        
+        # Calculate scores for each unread book
+        scored_books = []
+        for book in unread_books:
+            # Get scores for each genre (excluding Audiobook)
+            genre_scores = [
+                (genre.name, genre_weights.get(genre.name, 0))
+                for genre in book.genres
+                if genre.name != "Audiobook"  # Skip Audiobook genre
+            ]
+            # Only include genres with non-zero scores
+            genre_scores = [(name, score) for name, score in genre_scores if score > 0]
+            
+            if genre_scores:  # Only include books that match at least one genre
+                total_score = sum(score for _, score in genre_scores)
+                # Sort genre scores by score descending, then name
+                genre_scores.sort(key=lambda x: (-x[1], x[0]))
+                scored_books.append((book, total_score, genre_scores))
+        
+        # Sort by total score descending, then by Goodreads votes
+        scored_books.sort(key=lambda x: (-x[1], -(x[0].goodreads_votes or 0)))
+        
+        # Print debug info
+        print(f"\nFound {len(scored_books)} books with matching genres")
+        for book, total_score, genre_scores in scored_books[:5]:  # Show top 5 for debugging
+            print(f"\n{book.title}")
+            print(f"Total Score: {total_score}")
+            print("Genres:")
+            for genre, score in genre_scores:
+                print(f"  - {genre}: {score}")
+        
+        return scored_books[offset:offset + limit]
+
+    def get_on_deck_books(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Book]:
+        """
+        Get books that are 'on deck' for the user to read next.
+        This includes:
+        1. Books currently being read
+        2. Next unread books in series where the user has read previous books,
+           ordered by when the user last read a book in each series
+        
+        Only includes published books (where source is not None and published_state is 'published').
+        
+        Args:
+            user_id: The ID of the user
+            limit: Maximum number of books to return
+            offset: Number of books to skip
+            
+        Returns:
+            List of Book objects ordered by priority (reading first, then next in series)
+        """
+        # First, get all books currently being read by the user
+        reading_books = (
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "reading",
+                Book.source != None,  # Only include published books
+                or_(
+                    Book.published_state == "published",
+                    Book.published_state == None
+                )
+            )
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.book_users)
+            )
+            .all()
+        )
+        
+        print(f"\nFound {len(reading_books)} books currently being read")
+        for book in reading_books:
+            print(f"Currently reading: {book.title}")
+        
+        # Get all series where the user has read at least one book, ordered by last read date
+        read_series = (
+            self.session.query(Series, func.max(BookUser.finished_at).label('last_read'))
+            .join(BookSeries)
+            .join(Book)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed",
+                Book.source != None,  # Only include published books
+                or_(
+                    Book.published_state == "published",
+                    Book.published_state == None
+                )
+            )
+            .group_by(Series)
+            .order_by(desc('last_read'))
+            .all()
+        )
+        
+        print(f"\nFound {len(read_series)} series with completed books")
+        
+        # For each series, get the next unread book
+        next_in_series_books = []
+        for series, last_read in read_series:
+            # Get the highest series_order of completed books in this series
+            max_completed_order = (
+                self.session.query(func.max(BookSeries.series_order))
+                .join(Book)
+                .join(BookUser)
+                .filter(
+                    BookSeries.series.has(goodreads_id=series.goodreads_id),
+                    BookUser.user_id == user_id,
+                    BookUser.status == "completed",
+                    Book.source != None,  # Only include published books
+                    or_(
+                        Book.published_state == "published",
+                        Book.published_state == None
+                    )
+                )
+                .scalar() or 0
+            )
+            
+            # Get the next book in the series that hasn't been read
+            next_book = (
+                self.session.query(Book)
+                .join(BookSeries)
+                .outerjoin(BookUser, and_(
+                    BookUser.work_id == Book.work_id,
+                    BookUser.user_id == user_id
+                ))
+                .filter(
+                    BookSeries.series.has(goodreads_id=series.goodreads_id),
+                    BookSeries.series_order > max_completed_order,
+                    Book.source != None,  # Only include published books
+                    or_(
+                        Book.published_state == "published",
+                        Book.published_state == None
+                    ),
+                    or_(
+                        BookUser.work_id == None,  # No entry in book_users
+                        and_(
+                            BookUser.user_id == user_id,
+                            BookUser.status.notin_(["completed", "reading"])
+                        )
+                    )
+                )
+                .options(
+                    joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                    joinedload(Book.book_series).joinedload(BookSeries.series),
+                    joinedload(Book.book_users)
+                )
+                .order_by(BookSeries.series_order)
+                .first()
+            )
+            
+            if next_book:
+                print(f"\nFound next book in series {series.title}:")
+                print(f"  - {next_book.title} (order: {next_book.book_series[0].series_order})")
+                print(f"  - Last book in series read: {last_read}")
+                next_in_series_books.append(next_book)
+        
+        # Combine and deduplicate the results
+        all_books = reading_books + next_in_series_books
+        unique_books = list(dict.fromkeys(all_books))  # Preserve order while deduplicating
+        
+        # Apply pagination
+        paginated_books = unique_books[offset:offset + limit]
+        
+        return paginated_books
+
+    def add_wanted_book(self, user_id: int, work_id: str, source: str = "manual") -> Optional[BookWanted]:
+        """Add a book to the user's wanted list.
+        
+        Args:
+            user_id: The ID of the user
+            work_id: The work ID of the book to add
+            source: Where the book will be acquired from (default: "manual")
+            
+        Returns:
+            The created BookWanted entry if successful, None if the book doesn't exist
+            
+        Raises:
+            ValueError: If:
+                1. The book is already in the user's wanted list (prevents duplicates)
+                2. The book exists in the library (can't want what you already have)
+        """
+        # Validation 1: Check if the book exists in our books table
+        # We can't want a book that we don't know about
+        book = self.session.query(Book).filter(Book.work_id == work_id).first()
+        if not book:
+            return None
+            
+        # Validation 2: Check if already in wanted list
+        # Prevents duplicate entries for the same book
+        existing = (
+            self.session.query(BookWanted)
+            .filter(
+                BookWanted.user_id == user_id,
+                BookWanted.work_id == work_id
+            )
+            .first()
+        )
+        if existing:
+            raise ValueError(f"Book {work_id} is already in user's wanted list")
+
+        # Validation 3: Check if book exists in library
+        # Can't want a book that's already in the library
+        library_entry = (
+            self.session.query(Library)
+            .filter(Library.work_id == work_id)
+            .first()
+        )
+        if library_entry:
+            raise ValueError(f"Book {work_id} already exists in the library and cannot be marked as wanted")
+            
+        # All validations passed, create new wanted entry
+        wanted = BookWanted(
+            user_id=user_id,
+            work_id=work_id,
+            source=source
+        )
+        self.session.add(wanted)
+        
+        try:
+            self.session.commit()
+            return wanted
+        except Exception as e:
+            self.session.rollback()
+            raise ValueError(f"Error adding book to wanted list: {str(e)}")
+
+    def remove_wanted_book(self, user_id: int, work_id: str) -> bool:
+        """Remove a book from the user's wanted list.
+        
+        Args:
+            user_id: The ID of the user
+            work_id: The work ID of the book to remove
+            
+        Returns:
+            True if the book was removed, False if it wasn't in the wanted list
+        """
+        result = (
+            self.session.query(BookWanted)
+            .filter(
+                BookWanted.user_id == user_id,
+                BookWanted.work_id == work_id
+            )
+            .delete()
+        )
+        self.session.commit()
+        return result > 0
+
+    def get_wanted_books(
+        self,
+        user_id: int,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[BookWanted, Book]]:
+        """Get a user's wanted books with full book information.
+        
+        Args:
+            user_id: The ID of the user
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (BookWanted, Book) pairs
+        """
+        return (
+            self.session.query(BookWanted, Book)
+            .join(Book, BookWanted.work_id == Book.work_id)
+            .filter(BookWanted.user_id == user_id)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series)
+            )
+            .order_by(BookWanted.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    # Subscription Management Methods
+    
+    def subscribe_to_author(self, user_id: int, author_goodreads_id: str) -> Optional[UserAuthorSubscription]:
+        """Subscribe a user to an author.
+        
+        Args:
+            user_id: The ID of the user
+            author_goodreads_id: The Goodreads ID of the author
+            
+        Returns:
+            The created subscription if successful, None if the author doesn't exist
+            
+        Raises:
+            ValueError: If the user is already subscribed to this author
+        """
+        # Check if author exists
+        author = self.session.query(Author).filter(Author.goodreads_id == author_goodreads_id).first()
+        if not author:
+            return None
+            
+        # Check for existing subscription
+        existing = (
+            self.session.query(UserAuthorSubscription)
+            .filter(
+                UserAuthorSubscription.user_id == user_id,
+                UserAuthorSubscription.author_goodreads_id == author_goodreads_id,
+                UserAuthorSubscription.deleted_at.is_(None)  # Not soft deleted
+            )
+            .first()
+        )
+        if existing:
+            raise ValueError(f"Already subscribed to author {author_goodreads_id}")
+            
+        # Create new subscription
+        subscription = UserAuthorSubscription(
+            user_id=user_id,
+            author_goodreads_id=author_goodreads_id
+        )
+        self.session.add(subscription)
+        
+        try:
+            self.session.commit()
+            return subscription
+        except Exception as e:
+            self.session.rollback()
+            raise ValueError(f"Error creating author subscription: {str(e)}")
+            
+    def subscribe_to_series(self, user_id: int, series_goodreads_id: str) -> Optional[UserSeriesSubscription]:
+        """Subscribe a user to a series.
+        
+        Args:
+            user_id: The ID of the user
+            series_goodreads_id: The Goodreads ID of the series
+            
+        Returns:
+            The created subscription if successful, None if the series doesn't exist
+            
+        Raises:
+            ValueError: If the user is already subscribed to this series
+        """
+        # Check if series exists
+        series = self.session.query(Series).filter(Series.goodreads_id == series_goodreads_id).first()
+        if not series:
+            return None
+            
+        # Check for existing subscription
+        existing = (
+            self.session.query(UserSeriesSubscription)
+            .filter(
+                UserSeriesSubscription.user_id == user_id,
+                UserSeriesSubscription.series_goodreads_id == series_goodreads_id,
+                UserSeriesSubscription.deleted_at.is_(None)  # Not soft deleted
+            )
+            .first()
+        )
+        if existing:
+            raise ValueError(f"Already subscribed to series {series_goodreads_id}")
+            
+        # Create new subscription
+        subscription = UserSeriesSubscription(
+            user_id=user_id,
+            series_goodreads_id=series_goodreads_id
+        )
+        self.session.add(subscription)
+        
+        try:
+            self.session.commit()
+            return subscription
+        except Exception as e:
+            self.session.rollback()
+            raise ValueError(f"Error creating series subscription: {str(e)}")
+            
+    def unsubscribe_from_author(self, user_id: int, author_goodreads_id: str, hard_delete: bool = False) -> bool:
+        """Unsubscribe a user from an author.
+        
+        Args:
+            user_id: The ID of the user
+            author_goodreads_id: The Goodreads ID of the author
+            hard_delete: If True, removes the record; if False, soft deletes (default: False)
+            
+        Returns:
+            True if unsubscribed successfully, False if subscription not found
+        """
+        subscription = (
+            self.session.query(UserAuthorSubscription)
+            .filter(
+                UserAuthorSubscription.user_id == user_id,
+                UserAuthorSubscription.author_goodreads_id == author_goodreads_id,
+                UserAuthorSubscription.deleted_at.is_(None)  # Not already soft deleted
+            )
+            .first()
+        )
+        
+        if not subscription:
+            return False
+            
+        if hard_delete:
+            self.session.delete(subscription)
+        else:
+            subscription.deleted_at = datetime.now(UTC)
+            
+        self.session.commit()
+        return True
+        
+    def unsubscribe_from_series(self, user_id: int, series_goodreads_id: str, hard_delete: bool = False) -> bool:
+        """Unsubscribe a user from a series.
+        
+        Args:
+            user_id: The ID of the user
+            series_goodreads_id: The Goodreads ID of the series
+            hard_delete: If True, removes the record; if False, soft deletes (default: False)
+            
+        Returns:
+            True if unsubscribed successfully, False if subscription not found
+        """
+        subscription = (
+            self.session.query(UserSeriesSubscription)
+            .filter(
+                UserSeriesSubscription.user_id == user_id,
+                UserSeriesSubscription.series_goodreads_id == series_goodreads_id,
+                UserSeriesSubscription.deleted_at.is_(None)  # Not already soft deleted
+            )
+            .first()
+        )
+        
+        if not subscription:
+            return False
+            
+        if hard_delete:
+            self.session.delete(subscription)
+        else:
+            subscription.deleted_at = datetime.now(UTC)
+            
+        self.session.commit()
+        return True
+        
+    def restore_author_subscription(self, user_id: int, author_goodreads_id: str) -> bool:
+        """Restore a soft-deleted author subscription.
+        
+        Args:
+            user_id: The ID of the user
+            author_goodreads_id: The Goodreads ID of the author
+            
+        Returns:
+            True if restored successfully, False if subscription not found or not soft-deleted
+        """
+        subscription = (
+            self.session.query(UserAuthorSubscription)
+            .filter(
+                UserAuthorSubscription.user_id == user_id,
+                UserAuthorSubscription.author_goodreads_id == author_goodreads_id,
+                UserAuthorSubscription.deleted_at.isnot(None)  # Must be soft deleted
+            )
+            .first()
+        )
+        
+        if not subscription:
+            return False
+            
+        subscription.deleted_at = None
+        self.session.commit()
+        return True
+        
+    def restore_series_subscription(self, user_id: int, series_goodreads_id: str) -> bool:
+        """Restore a soft-deleted series subscription.
+        
+        Args:
+            user_id: The ID of the user
+            series_goodreads_id: The Goodreads ID of the series
+            
+        Returns:
+            True if restored successfully, False if subscription not found or not soft-deleted
+        """
+        subscription = (
+            self.session.query(UserSeriesSubscription)
+            .filter(
+                UserSeriesSubscription.user_id == user_id,
+                UserSeriesSubscription.series_goodreads_id == series_goodreads_id,
+                UserSeriesSubscription.deleted_at.isnot(None)  # Must be soft deleted
+            )
+            .first()
+        )
+        
+        if not subscription:
+            return False
+            
+        subscription.deleted_at = None
+        self.session.commit()
+        return True
+        
+    def get_author_subscriptions(
+        self,
+        user_id: int,
+        include_deleted: bool = False,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[UserAuthorSubscription, Author]]:
+        """Get a user's author subscriptions with full author information.
+        
+        Args:
+            user_id: The ID of the user
+            include_deleted: Whether to include soft-deleted subscriptions (default: False)
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (UserAuthorSubscription, Author) pairs
+        """
+        query = (
+            self.session.query(UserAuthorSubscription, Author)
+            .join(Author, UserAuthorSubscription.author_goodreads_id == Author.goodreads_id)
+            .filter(UserAuthorSubscription.user_id == user_id)
+        )
+        
+        if not include_deleted:
+            query = query.filter(UserAuthorSubscription.deleted_at.is_(None))
+            
+        return (
+            query
+            .order_by(UserAuthorSubscription.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        
+    def get_series_subscriptions(
+        self,
+        user_id: int,
+        include_deleted: bool = False,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[UserSeriesSubscription, Series]]:
+        """Get a user's series subscriptions with full series information.
+        
+        Args:
+            user_id: The ID of the user
+            include_deleted: Whether to include soft-deleted subscriptions (default: False)
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (UserSeriesSubscription, Series) pairs
+        """
+        query = (
+            self.session.query(UserSeriesSubscription, Series)
+            .join(Series, UserSeriesSubscription.series_goodreads_id == Series.goodreads_id)
+            .filter(UserSeriesSubscription.user_id == user_id)
+        )
+        
+        if not include_deleted:
+            query = query.filter(UserSeriesSubscription.deleted_at.is_(None))
+            
+        return (
+            query
+            .order_by(UserSeriesSubscription.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        
+    def is_subscribed_to_author(self, user_id: int, author_goodreads_id: str, include_deleted: bool = False) -> bool:
+        """Check if a user is subscribed to an author.
+        
+        Args:
+            user_id: The ID of the user
+            author_goodreads_id: The Goodreads ID of the author
+            include_deleted: Whether to include soft-deleted subscriptions (default: False)
+            
+        Returns:
+            True if subscribed, False otherwise
+        """
+        query = (
+            self.session.query(UserAuthorSubscription)
+            .filter(
+                UserAuthorSubscription.user_id == user_id,
+                UserAuthorSubscription.author_goodreads_id == author_goodreads_id
+            )
+        )
+        
+        if not include_deleted:
+            query = query.filter(UserAuthorSubscription.deleted_at.is_(None))
+            
+        return query.first() is not None
+        
+    def is_subscribed_to_series(self, user_id: int, series_goodreads_id: str, include_deleted: bool = False) -> bool:
+        """Check if a user is subscribed to a series.
+        
+        Args:
+            user_id: The ID of the user
+            series_goodreads_id: The Goodreads ID of the series
+            include_deleted: Whether to include soft-deleted subscriptions (default: False)
+            
+        Returns:
+            True if subscribed, False otherwise
+        """
+        query = (
+            self.session.query(UserSeriesSubscription)
+            .filter(
+                UserSeriesSubscription.user_id == user_id,
+                UserSeriesSubscription.series_goodreads_id == series_goodreads_id
+            )
+        )
+        
+        if not include_deleted:
+            query = query.filter(UserSeriesSubscription.deleted_at.is_(None))
+            
+        return query.first() is not None
+
+    def get_series_books_with_user_status(
+        self,
+        user_id: int,
+        series_goodreads_id: str
+    ) -> List[Book]:
+        """Get all books in a series with their read status for a user.
+        
+        Args:
+            user_id: The ID of the user
+            series_goodreads_id: The Goodreads ID of the series
+            
+        Returns:
+            List of Book objects with loaded relationships, ordered by series position
+        """
+        return (
+            self.session.query(Book)
+            .join(BookSeries)
+            .filter(BookSeries.series_id == series_goodreads_id)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.book_users)
+            )
+            .order_by(BookSeries.series_order)
+            .all()
         ) 

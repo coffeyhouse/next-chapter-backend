@@ -1,9 +1,9 @@
 # core/sa/repositories/book.py
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from sqlalchemy import select, desc, not_, exists
+from sqlalchemy import select, desc, not_, exists, func, case, and_
 from sqlalchemy.orm import Session, joinedload
-from ..models import Book, Author, Genre, Series, BookSimilar, BookAuthor
+from ..models import Book, Author, Genre, Series, BookSimilar, BookAuthor, BookSeries, BookUser
 
 class BookRepository:
     def __init__(self, session: Session):
@@ -14,8 +14,27 @@ class BookRepository:
         return self.session.query(Book).filter(Book.goodreads_id == goodreads_id).first()
 
     def get_by_work_id(self, work_id: str) -> Optional[Book]:
-        """Get a book by its work ID"""
-        return self.session.query(Book).filter(Book.work_id == work_id).first()
+        """Get a book by its work ID with all relationships loaded.
+        
+        Args:
+            work_id: The work ID of the book
+            
+        Returns:
+            Book object with loaded relationships (authors, series, genres, similar books, user status)
+            or None if not found
+        """
+        return (
+            self.session.query(Book)
+            .filter(Book.work_id == work_id)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.genres),
+                joinedload(Book.book_users),
+                joinedload(Book.similar_to).joinedload(BookSimilar.similar_book)
+            )
+            .first()
+        )
 
     def search_books(
         self, 
@@ -158,3 +177,93 @@ class BookRepository:
         
         # Order by rating desc so we process popular books first
         return query.order_by(desc(Book.goodreads_rating)).all()
+
+    def get_series_with_counts(
+        self,
+        query: Optional[str] = None,
+        user_id: Optional[int] = None,
+        sort_by: str = "book_count",
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[Series, int, int]]:
+        """Get series with their book counts and user read counts.
+        
+        Args:
+            query: Optional search string to filter series by title
+            user_id: Optional user ID to get read counts for
+            sort_by: Sort by 'book_count' or 'read_count'
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (Series, total_book_count, user_read_count)
+        """
+        # Subquery to count completed books for the user in each series
+        if user_id is not None:
+            user_read_count = (
+                func.count(
+                    func.distinct(
+                        case(
+                            (and_(
+                                BookUser.user_id == user_id,
+                                BookUser.status == "completed"
+                            ), Book.work_id),
+                            else_=None
+                        )
+                    )
+                ).label('user_read_count')
+            )
+        else:
+            # For SQLite, use a simpler expression that always returns 0
+            user_read_count = func.count(None).label('user_read_count')
+            user_read_count = (user_read_count - user_read_count).label('user_read_count')
+
+        base_query = (
+            self.session.query(
+                Series,
+                func.count(func.distinct(Book.work_id)).label('book_count'),
+                user_read_count
+            )
+            .select_from(Series)
+            .join(BookSeries, Series.goodreads_id == BookSeries.series_id)
+            .join(Book, Book.work_id == BookSeries.work_id)
+        )
+        
+        if user_id is not None:
+            base_query = base_query.outerjoin(
+                BookUser,
+                and_(
+                    BookUser.work_id == Book.work_id,
+                    BookUser.user_id == user_id,
+                    BookUser.status == "completed"
+                )
+            )
+        
+        base_query = base_query.group_by(Series)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Series.title.ilike(f"%{query}%"))
+            
+        # Apply sorting
+        if sort_by == "read_count":
+            base_query = base_query.order_by(desc('user_read_count'), desc('book_count'), Series.title)
+        else:  # Default to book_count
+            base_query = base_query.order_by(desc('book_count'), Series.title)
+            
+        return base_query.offset(offset).limit(limit).all()
+        
+    def count_series(self, query: Optional[str] = None) -> int:
+        """Count total number of series.
+        
+        Args:
+            query: Optional search string to filter series by title
+            
+        Returns:
+            Total count of series matching the criteria
+        """
+        base_query = self.session.query(Series)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Series.title.ilike(f"%{query}%"))
+            
+        return base_query.count()
