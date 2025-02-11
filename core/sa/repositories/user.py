@@ -1,9 +1,9 @@
 from typing import List, Optional
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, and_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from core.sa.models import User, Book, BookUser, Library
+from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries
 
 class UserRepository:
     """Repository for managing User entities."""
@@ -342,4 +342,64 @@ class UserRepository:
             user = User(name=name)
             self.session.add(user)
             self.session.commit()
-        return user 
+        return user
+
+    def get_user_books_by_statuses(
+        self,
+        user_id: int,
+        statuses: List[str],
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
+        """Get books for a user with specific statuses.
+        
+        Args:
+            user_id: The ID of the user
+            statuses: List of book statuses to filter by (e.g., ['completed', 'reading'])
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of Book objects with loaded relationships
+        """
+        return (
+            self.session.query(Book)
+            .join(BookUser, and_(
+                BookUser.work_id == Book.work_id,
+                BookUser.user_id == user_id,
+                BookUser.status.in_(statuses)
+            ))
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.book_users).joinedload(BookUser.book)
+            )
+            .order_by(desc(BookUser.updated_at))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    def count_user_books_by_statuses(
+        self,
+        user_id: int,
+        statuses: List[str]
+    ) -> int:
+        """Count books for a user with specific statuses.
+        
+        Args:
+            user_id: The ID of the user
+            statuses: List of book statuses to filter by (e.g., ['completed', 'reading'])
+            
+        Returns:
+            Total count of matching books
+        """
+        return (
+            self.session.query(Book)
+            .join(BookUser, and_(
+                BookUser.work_id == Book.work_id,
+                BookUser.user_id == user_id,
+                BookUser.status.in_(statuses)
+            ))
+            .count()
+        ) 

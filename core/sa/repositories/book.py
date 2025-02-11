@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlalchemy import select, desc, not_, exists
 from sqlalchemy.orm import Session, joinedload
-from ..models import Book, Author, Genre, Series, BookSimilar
+from ..models import Book, Author, Genre, Series, BookSimilar, BookAuthor
 
 class BookRepository:
     def __init__(self, session: Session):
@@ -17,26 +17,61 @@ class BookRepository:
         """Get a book by its work ID"""
         return self.session.query(Book).filter(Book.work_id == work_id).first()
 
-    def search_books(self, query: str, limit: int = 20) -> List[Book]:
+    def search_books(
+        self, 
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
         """Search books by title and include author relationships.
         
         Args:
             query: Search query string
+            source: Filter by source
             limit: Maximum number of results to return
+            offset: Number of records to skip
             
         Returns:
             List of Book objects with loaded author relationships
         """
         base_query = self.session.query(Book).options(
-            joinedload(Book.authors),
+            joinedload(Book.book_authors).joinedload(BookAuthor.author),
             joinedload(Book.genres),
             joinedload(Book.series)
         )
         
         if query and query.strip():
             base_query = base_query.filter(Book.title.ilike(f"%{query}%"))
+            
+        if source:
+            base_query = base_query.filter(Book.source == source)
         
-        return base_query.order_by(desc(Book.goodreads_rating)).limit(limit).all()
+        return base_query.order_by(desc(Book.goodreads_rating)).offset(offset).limit(limit).all()
+        
+    def count_books(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None
+    ) -> int:
+        """Count total books matching the search criteria.
+        
+        Args:
+            query: Search query string
+            source: Filter by source
+            
+        Returns:
+            Total count of matching books
+        """
+        base_query = self.session.query(Book)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Book.title.ilike(f"%{query}%"))
+            
+        if source:
+            base_query = base_query.filter(Book.source == source)
+            
+        return base_query.count()
 
     def get_books_by_author(self, author_id: str) -> List[Book]:
         """Get all books by a specific author"""
