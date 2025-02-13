@@ -15,6 +15,8 @@ router = APIRouter(prefix="/books", tags=["books"])
 def get_books(
     query: Optional[str] = Query(None, description="Search books by title"),
     source: Optional[str] = Query(None, description="Filter books by source"),
+    sort: str = Query("goodreads_votes", description="Sort field (goodreads_votes, goodreads_rating, title, published_date)"),
+    order: str = Query("desc", description="Sort order (asc or desc)"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
@@ -25,6 +27,8 @@ def get_books(
     Args:
         query: Optional search string to filter books by title
         source: Optional source to filter books
+        sort: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+        order: Sort order (asc or desc)
         page: Page number (1-based)
         size: Number of items per page
         db: Database session
@@ -32,6 +36,15 @@ def get_books(
     Returns:
         BookList containing paginated books with basic information
     """
+    # Validate sort field
+    valid_sort_fields = ["goodreads_votes", "goodreads_rating", "title", "published_date"]
+    if sort not in valid_sort_fields:
+        raise HTTPException(status_code=400, detail=f"Invalid sort field. Must be one of: {', '.join(valid_sort_fields)}")
+    
+    # Validate sort order
+    if order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="Invalid sort order. Must be 'asc' or 'desc'")
+    
     repo = BookRepository(db)
     
     # Calculate offset for pagination
@@ -41,6 +54,8 @@ def get_books(
     books = repo.search_books(
         query=query,
         source=source,
+        sort_field=sort,
+        sort_order=order,
         limit=size,
         offset=offset
     )

@@ -40,6 +40,8 @@ class BookRepository:
         self, 
         query: Optional[str] = None,
         source: Optional[str] = None,
+        sort_field: str = "goodreads_votes",
+        sort_order: str = "desc",
         limit: int = 20,
         offset: int = 0
     ) -> List[Book]:
@@ -48,6 +50,8 @@ class BookRepository:
         Args:
             query: Search query string
             source: Filter by source
+            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+            sort_order: Sort order (asc or desc)
             limit: Maximum number of results to return
             offset: Number of records to skip
             
@@ -66,7 +70,14 @@ class BookRepository:
         if source:
             base_query = base_query.filter(Book.source == source)
         
-        return base_query.order_by(desc(Book.goodreads_rating)).offset(offset).limit(limit).all()
+        # Apply sorting
+        sort_column = getattr(Book, sort_field)
+        if sort_order == "desc":
+            base_query = base_query.order_by(desc(sort_column))
+        else:
+            base_query = base_query.order_by(sort_column)
+        
+        return base_query.offset(offset).limit(limit).all()
         
     def count_books(
         self,
@@ -267,3 +278,11 @@ class BookRepository:
             base_query = base_query.filter(Series.title.ilike(f"%{query}%"))
             
         return base_query.count()
+
+    def get_all_books_with_images(self) -> List[Book]:
+        """Get all books that have old-style image URLs (data\images\book)"""
+        return (
+            self.session.query(Book)
+            .filter(Book.image_url.like('data\\images\\book%'))
+            .all()
+        )

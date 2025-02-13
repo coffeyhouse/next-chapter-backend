@@ -6,19 +6,52 @@ import json
 from urllib.parse import urlparse
 import logging
 from typing import Optional, Tuple
+from PIL import Image
+from io import BytesIO
+import click
 
 logger = logging.getLogger(__name__)
 
 class ImageDownloader:
     def __init__(self, base_dir: str = 'data/images'):
-        """Initialize the image downloader with a base directory"""
-        self.base_dir = Path(base_dir)
+        """Initialize the image downloader with a base directory.
+        If base_dir is an absolute path, it will be used as is.
+        Otherwise, it will be relative to the current working directory."""
+        self.base_dir = Path(base_dir) if os.path.isabs(base_dir) else Path(base_dir)
         
     def _create_directory(self, image_type: str) -> Path:
         """Create and return the appropriate directory for the image type"""
-        directory = self.base_dir / image_type
+        directory = self.base_dir / image_type if image_type else self.base_dir
         directory.mkdir(parents=True, exist_ok=True)
         return directory
+        
+    def _process_image(self, image_data: bytes, max_height: int = 500) -> bytes:
+        """Process the image to ensure it's a JPG and resize if needed.
+        
+        Args:
+            image_data: Raw image bytes
+            max_height: Maximum height in pixels (default: 500)
+            
+        Returns:
+            Processed image as bytes
+        """
+        # Open image from bytes
+        img = Image.open(BytesIO(image_data))
+        
+        # Convert to RGB if necessary (e.g., if PNG with transparency)
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        
+        # Calculate new dimensions if height exceeds max_height
+        if img.height > max_height:
+            ratio = max_height / img.height
+            new_width = int(img.width * ratio)
+            img = img.resize((new_width, max_height), Image.Resampling.LANCZOS)
+        
+        # Save to bytes
+        output = BytesIO()
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        return output.getvalue()
         
     def _get_extension(self, url: str, content_type: str) -> str:
         """Determine the file extension from URL or content type"""
@@ -85,8 +118,8 @@ class ImageDownloader:
         
         Args:
             url: The URL of the image to download
-            image_type: Type of image (e.g., 'book', 'author')
-            identifier: Unique identifier for the image (e.g., book_id or author_id)
+            image_type: Type of image (e.g., 'book', 'author') or empty string for base directory
+            identifier: Unique identifier for the image (e.g., work_id or author_id)
             force_update: If True, download even if file exists
             
         Returns:
@@ -105,32 +138,53 @@ class ImageDownloader:
             content_type = response.headers.get('content-type', 'image/jpeg')
             if not self._validate_image(response.content, content_type):
                 return False, None
-                
-            extension = self._get_extension(url, content_type)
-            file_path = save_dir / f"{identifier}{extension}"
+            
+            # Process image
+            processed_image = self._process_image(response.content)
+            
+            # Always use .jpg extension since we're converting to JPEG
+            file_path = save_dir / f"{identifier}.jpg"
             
             if file_path.exists() and not force_update:
                 return True, str(file_path)
             
             with open(file_path, 'wb') as f:
-                f.write(response.content)
+                f.write(processed_image)
                 
             return True, str(file_path)
             
         except requests.RequestException:
             return False, None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error processing image: {str(e)}")
             return False, None
 
-def download_book_cover(book_id: str, cover_url: str) -> Optional[str]:
-    """Download a book cover image"""
-    downloader = ImageDownloader()
-    success, path = downloader.download_image(
-        url=cover_url,
-        image_type='book',
-        identifier=book_id
-    )
-    return path if success else None
+def download_book_cover(work_id: str, cover_url: str) -> Optional[str]:
+    """Download a book cover image using work_id as filename"""
+    # Use absolute path to frontend's public covers directory
+    covers_dir = "C:/Code/calibre_companion/frontend/public/covers"
+    
+    try:
+        # Create directory if it doesn't exist
+        Path(covers_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Download image
+        response = requests.get(cover_url)
+        if not response.ok:
+            click.echo(f"Failed to download image from {cover_url}: {response.status_code}")
+            return None
+            
+        # Save image
+        image_path = Path(covers_dir) / f"{work_id}.jpg"
+        with open(image_path, 'wb') as f:
+            f.write(response.content)
+            
+        # Return frontend-relative path
+        return f"/covers/{work_id}.jpg"
+        
+    except Exception as e:
+        click.echo(f"Error downloading cover: {e}")
+        return None
 
 def download_author_photo(author_id: str, photo_url: str) -> Optional[str]:
     """Download an author photo"""

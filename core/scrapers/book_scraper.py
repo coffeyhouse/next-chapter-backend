@@ -111,7 +111,7 @@ class BookScraper:
             # Get cover image
             cover_url = self._extract_cover_url(soup)
             if cover_url:
-                local_path = download_book_cover(book_id, cover_url)
+                local_path = download_book_cover(book_data['work_id'], cover_url)
                 if local_path:
                     book_data['image_url'] = local_path
             
@@ -347,18 +347,51 @@ class BookScraper:
     
     def _extract_cover_url(self, soup) -> str:
         """Extract book cover URL"""
+        # Try to get from __NEXT_DATA__ first (new Goodreads structure)
+        next_data = soup.find('script', id='__NEXT_DATA__')
+        if next_data:
+            try:
+                data = json.loads(next_data.string)
+                apollo_state = data['props']['pageProps']['apolloState']
+                
+                # Find the book ID from the query
+                book_id = None
+                for key, value in apollo_state.items():
+                    if key == 'ROOT_QUERY':
+                        for query_key in value:
+                            if 'getBookByLegacyId' in query_key:
+                                book_id = value[query_key]['__ref']
+                                break
+                
+                # Get image URL using book ID
+                if book_id and book_id in apollo_state:
+                    image_url = apollo_state[book_id].get('imageUrl')
+                    if image_url:
+                        return image_url
+            except (json.JSONDecodeError, KeyError):
+                pass
+                
+        # Try ResponsiveImage class
         img = soup.find('img', {'class': 'ResponsiveImage'})
         if img and 'src' in img.attrs:
             return img['src']
             
-        # Fallback to schema.org data
+        # Try schema.org data
         schema = soup.find('script', {'type': 'application/ld+json'})
         if schema:
             try:
                 data = json.loads(schema.string)
-                return data.get('image')
+                image_url = data.get('image')
+                if image_url:
+                    return image_url
             except json.JSONDecodeError:
                 pass
+                
+        # Try og:image meta tag
+        og_image = soup.find('meta', {'property': 'og:image'})
+        if og_image and og_image.get('content'):
+            return og_image['content']
+                
         return None
     
     def _extract_work_id(self, soup) -> str:

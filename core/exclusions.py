@@ -18,7 +18,9 @@ EXCLUSION_RULES = {
         "trilogy", 
         "anthology",
         "books set",
-        "novel collection"
+        "novel collection",
+        "Collection Set",
+        "Book Set",
     ],     
     "max_pages": 1800,                     # Exclude books with more than 1800 pages
 }
