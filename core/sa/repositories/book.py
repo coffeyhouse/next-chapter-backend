@@ -1,7 +1,7 @@
 # core/sa/repositories/book.py
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from sqlalchemy import select, desc, not_, exists, func, case, and_
+from sqlalchemy import select, desc, not_, exists, func, case, and_, or_
 from sqlalchemy.orm import Session, joinedload
 from ..models import Book, Author, Genre, Series, BookSimilar, BookAuthor, BookSeries, BookUser
 
@@ -279,10 +279,82 @@ class BookRepository:
             
         return base_query.count()
 
-    def get_all_books_with_images(self) -> List[Book]:
-        """Get all books that have old-style image URLs (data\images\book)"""
-        return (
-            self.session.query(Book)
-            .filter(Book.image_url.like('data\\images\\book%'))
-            .all()
+    def get_all_books_with_images(self, force: bool = False) -> List[Book]:
+        """Get books that need image conversion.
+        
+        Args:
+            force: If True, get all books with images regardless of format.
+                  If False, only get books with non-WebP images.
+        
+        Returns:
+            List of Book objects that need image processing
+        """
+        query = self.session.query(Book).filter(Book.image_url.isnot(None))
+        
+        if not force:
+            # Only get books that don't already have WebP images
+            query = query.filter(not_(Book.image_url.like('%.webp')))
+            
+        return query.all()
+
+    def update_book_status(
+        self,
+        user_id: int,
+        work_id: str,
+        status: str,
+        source: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None
+    ) -> Optional[BookUser]:
+        """Update or create a book status for a user.
+        
+        Args:
+            user_id: ID of the user
+            work_id: Work ID of the book
+            status: Reading status (reading, completed)
+            source: Optional source of the book
+            started_at: Optional start date
+            finished_at: Optional finish date
+            
+        Returns:
+            Updated or created BookUser object, or None if book not found
+        """
+        # Get the book first
+        book = self.get_by_work_id(work_id)
+        if not book:
+            return None
+            
+        # Check if status already exists
+        book_user = (
+            self.session.query(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.work_id == work_id
+            )
+            .first()
         )
+        
+        if book_user:
+            # Update existing status
+            book_user.status = status
+            book_user.source = source
+            book_user.started_at = started_at
+            book_user.finished_at = finished_at
+        else:
+            # Create new status
+            book_user = BookUser(
+                user_id=user_id,
+                work_id=work_id,
+                status=status,
+                source=source,
+                started_at=started_at,
+                finished_at=finished_at
+            )
+            self.session.add(book_user)
+            
+        try:
+            self.session.commit()
+            return book_user
+        except:
+            self.session.rollback()
+            raise

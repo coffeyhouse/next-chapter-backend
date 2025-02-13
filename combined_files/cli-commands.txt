@@ -1,0 +1,1574 @@
+# cli\commands\author.py
+
+import click
+from core.database import GoodreadsDB
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from core.scrapers.author_scraper import AuthorScraper
+from core.scrapers.author_books_scraper import AuthorBooksScraper
+from core.sa.repositories.author import AuthorRepository
+from core.sa.models import Author, Book, BookAuthor
+from datetime import datetime, UTC
+from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+
+@click.group()
+def author():
+    """Author management commands"""
+    pass
+
+@author.command()
+@click.option('--days', default=30, help='Sync authors not updated in this many days')
+@click.option('--limit', default=None, type=int, help='Limit number of authors to sync')
+@click.option('--source', default=None, help='Only sync authors with books from this source (e.g. library)')
+@click.option('--goodreads-id', default=None, help='Sync a specific author by Goodreads ID')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool):
+    """Sync unsynced authors and import their books using SQLAlchemy
+    
+    This command uses the SQLAlchemy-based BookCreator to import books from authors.
+    It will create book records with proper relationships for authors, genres, and series.
+    
+    Example:
+        cli author sync-sa --days 7  # Sync authors not updated in 7 days
+        cli author sync-sa --limit 10 --scrape  # Sync 10 authors with fresh data
+        cli author sync-sa --source library  # Only sync authors with books from library
+        cli author sync-sa --goodreads-id 18541  # Sync specific author by ID
+    """
+    # Print initial sync information
+    print_sync_start(days, limit, source, goodreads_id, 'authors', verbose)
+
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create repositories and services
+        author_repo = AuthorRepository(session)
+        creator = BookCreator(session, scrape=scrape)
+        author_scraper = AuthorScraper(scrape=scrape)
+        books_scraper = AuthorBooksScraper(scrape=scrape)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
+        # Get authors to sync
+        if goodreads_id:
+            # Get or create the specific author
+            author = author_repo.get_by_goodreads_id(goodreads_id)
+            if not author:
+                # Try to get author data to create new author
+                author_data = author_scraper.scrape_author(goodreads_id)
+                if author_data:
+                    author = Author(
+                        goodreads_id=goodreads_id,
+                        name=author_data.get('name'),
+                        bio=author_data.get('bio'),
+                        image_url=author_data.get('image_url')
+                    )
+                    session.add(author)
+                    session.commit()
+                else:
+                    click.echo(click.style(f"\nFailed to find or create author with ID: {goodreads_id}", fg='red'))
+                    return
+            authors_to_sync = [author]
+        else:
+            # Get authors that need updating
+            authors_to_sync = author_repo.get_unsynced_authors(days, source)
+            if limit:
+                authors_to_sync = authors_to_sync[:limit]
+        
+        if verbose:
+            click.echo(click.style(f"\nFound {len(authors_to_sync)} authors to sync", fg='blue'))
+        
+        # Process each author
+        with create_progress_bar(authors_to_sync, verbose, 'Processing authors', 
+                               lambda a: a.name) as author_iter:
+            for author in author_iter:
+                try:
+                    # Get author data
+                    author_data = author_scraper.scrape_author(author.goodreads_id)
+                    if not author_data:
+                        tracker.add_skipped(author.name, author.goodreads_id, 
+                                         "Failed to scrape author data", 'red')
+                        continue
+
+                    # Update author details
+                    author.bio = author_data.get('bio')
+                    author.image_url = author_data.get('image_url')
+                    session.commit()
+
+                    # Get author's books
+                    books_data = books_scraper.scrape_author_books(author.goodreads_id)
+                    if not books_data:
+                        tracker.add_skipped(author.name, author.goodreads_id,
+                                         "Failed to scrape author's books", 'red')
+                        continue
+
+                    # Process each book
+                    for book_data in books_data['books']:
+                        try:
+                            # First get the full book data to check author role
+                            book_details = creator.resolver.resolve_book(book_data['goodreads_id'])
+                            if not book_details:
+                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                                 "Failed to get book details", 'red')
+                                continue
+
+                            # Check if this author is listed as 'Author' for this book
+                            is_primary_author = False
+                            author_role = None
+                            for book_author in book_details.get('authors', []):
+                                if book_author.get('goodreads_id') == author.goodreads_id:
+                                    author_role = book_author.get('role', '')
+                                    if author_role.lower() == 'author':
+                                        is_primary_author = True
+                                    break
+
+                            if not is_primary_author:
+                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                                f"Author role is '{author_role or 'Unknown'}' (not primary Author)")
+                                continue
+
+                            # Create the book since author is primary
+                            book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='author')
+                            if book:
+                                tracker.increment_imported()
+                            else:
+                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                                "Book already exists or was previously scraped")
+                        except Exception as e:
+                            tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                            f"Error: {str(e)}", 'red')
+
+                    # Update author last_synced_at
+                    update_last_synced(author, session)
+                    tracker.increment_processed()
+                    
+                except Exception as e:
+                    tracker.add_skipped(author.name, author.goodreads_id,
+                                    f"Error: {str(e)}", 'red')
+        
+        # Print results
+        tracker.print_results('authors')
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during sync: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+if __name__ == '__main__':
+    author()
+
+
+# cli\commands\book.py
+
+import click
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from typing import Optional
+from bs4 import BeautifulSoup
+from PIL import Image
+from io import BytesIO
+
+@click.group()
+def book():
+    """Book related commands"""
+    pass
+
+@book.command()
+@click.argument('goodreads_id')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+def create(goodreads_id: str, scrape: bool):
+    """Create a book from Goodreads ID
+    
+    Example:
+        cli book create 54493401  # Create Project Hail Mary
+        cli book create 7235533 --scrape  # Create The Way of Kings with fresh data
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create book creator
+        creator = BookCreator(session, scrape=scrape)
+        
+        # Create the book
+        book = creator.create_book_from_goodreads(goodreads_id)
+        
+        if book is None:
+            click.echo(f"Book with Goodreads ID {goodreads_id} already exists or could not be created")
+            return
+        
+        # Print success message with book details
+        click.echo(f"Successfully created book:")
+        click.echo(f"  Title: {book.title}")
+        click.echo(f"  Author(s): {', '.join(author.name for author in book.authors)}")
+        click.echo(f"  Genre(s): {', '.join(genre.name for genre in book.genres)}")
+        if book.series:
+            click.echo(f"  Series: {', '.join(series.title for series in book.series)}")
+        
+    except Exception as e:
+        click.echo(f"Error creating book: {str(e)}", err=True)
+        raise
+    finally:
+        session.close()
+
+@book.command()
+@click.option('--force/--no-force', default=False, help='Force redownload of all images')
+@click.option('--scrape/--no-scrape', default=True, help='Whether to scrape live or use cached data')
+@click.option('--limit', default=None, type=int, help='Limit number of books to process')
+def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
+    """Fix book cover paths to use frontend public directory"""
+    from sqlalchemy.orm import Session
+    from core.sa.database import Database
+    from core.sa.repositories.book import BookRepository
+    from core.utils.image import download_book_cover
+    from core.scrapers.book_scraper import BookScraper
+    import shutil
+    from pathlib import Path
+    import requests
+    from typing import Optional
+    
+    # Initialize database and scrapers
+    db = Database()
+    session = Session(db.engine)
+    repo = BookRepository(session)
+    scraper = BookScraper(scrape=scrape)
+    
+    try:
+        # Get books that need image processing
+        books = repo.get_all_books_with_images(force=force)
+        
+        # Apply limit if specified
+        if limit:
+            books = books[:limit]
+            click.echo(f"\nLimiting to {limit} books")
+        
+        # Create frontend covers directory if it doesn't exist
+        covers_dir = Path("C:/Code/calibre_companion/frontend/public/covers")
+        covers_dir.mkdir(parents=True, exist_ok=True)
+        
+        click.echo(f"\nProcessing {len(books)} books with covers...")
+        
+        for i, book in enumerate(books, 1):
+            try:
+                click.echo(f"[{i}/{len(books)}] Processing: {book.title}")
+                
+                # Get fresh book data to ensure we have the latest cover URL
+                book_data = scraper.scrape_book(book.goodreads_id)
+                if not book_data:
+                    continue
+                
+                # Get cover URL from scraped data
+                cover_url = scraper._extract_cover_url(BeautifulSoup(scraper._read_html(book.goodreads_id), 'html.parser'))
+                if not cover_url:
+                    continue
+                
+                try:
+                    # Download image
+                    response = requests.get(cover_url)
+                    if not response.ok:
+                        continue
+                        
+                    # Process image
+                    img = Image.open(BytesIO(response.content))
+                    
+                    # Convert to RGB if necessary
+                    if img.mode in ('RGBA', 'P'):
+                        img = img.convert('RGB')
+                    
+                    # Resize if height exceeds max_height
+                    max_height = 300
+                    if img.height > max_height:
+                        ratio = max_height / img.height
+                        new_width = int(img.width * ratio)
+                        img = img.resize((new_width, max_height), Image.Resampling.LANCZOS)
+                        
+                    # Save as WebP
+                    image_path = covers_dir / f"{book.work_id}.webp"
+                    img.save(image_path, format='WEBP', quality=85, method=6)
+                    
+                    # Update database
+                    new_url = f"/covers/{book.work_id}.webp"
+                    book.image_url = new_url
+                    session.add(book)
+                    session.commit()
+                    
+                    click.echo(f"  Updated cover for: {book.title}")
+                        
+                except (requests.RequestException, IOError, Exception) as e:
+                    click.echo(f"  Error processing image: {e}")
+                    continue
+                
+            except Exception as e:
+                session.rollback()
+                click.echo(f"  Error processing book: {e}")
+                continue
+                
+    except Exception as e:
+        click.echo(f"\nError during cover update: {e}", err=True)
+        raise
+    finally:
+        session.close()
+        
+    click.echo("\nFinished updating book covers")
+
+
+
+# cli\commands\chain.py
+
+import click
+from core.database import GoodreadsDB
+
+@click.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to the books database')
+@click.option('--calibre-path', default="C:/path/to/calibre/metadata.db", help='Path to Calibre metadata.db')
+@click.option('--limit', default=None, type=int, help='Limit number of books for each operation')
+def chain(db_path: str, calibre_path: str, limit: int):
+    """
+    Chain several CLI operations:
+      1. Import books from the Calibre library.
+      2. Sync similar books (for books with source "library").
+      3. Sync series.
+
+    This command will run the three tasks sequentially.
+    """
+    db = GoodreadsDB(db_path)
+
+    click.echo("\n=== Starting Library Import ===")
+    lib_processed, lib_imported = db.import_calibre_books(calibre_path, limit)
+    click.echo(f"Library Import: Processed {lib_processed} books, Imported {lib_imported} books.\n")
+
+    click.echo("=== Starting Similar Sync ===")
+    sim_processed, sim_imported = db.sync_similar(source="library", limit=limit)
+    click.echo(f"Similar Sync: Processed {sim_processed} books, Imported {sim_imported} similar relationships.\n")
+
+    click.echo("=== Starting Series Sync ===")
+    ser_processed, ser_imported = db.sync_series(limit=limit)
+    click.echo(f"Series Sync: Processed {ser_processed} series, Imported {ser_imported} books from series.\n")
+
+if __name__ == '__main__':
+    chain()
+
+
+
+# cli\commands\dev.py
+
+import click
+from pathlib import Path
+import os
+
+@click.group()
+def dev():
+    """Development helper commands"""
+    pass
+
+@dev.command()
+@click.option('--output', default="directory_structure.txt", help='Output file path')
+def structure(output: str):
+    """Output directory structure to file"""
+    click.echo(f"\nGenerating directory structure to: {output}")
+    
+    EXCLUDE_DIRS = {
+        '.git', '__pycache__', 'backend',
+        'author_photos', 'book_covers', 'exported_html'
+    }
+    DATA_FOLDER_ONLY = {'data'}
+    
+    def should_skip_dir(path: Path) -> bool:
+        return path.name in EXCLUDE_DIRS
+        
+    def get_structure(path: Path, indent: str = "", is_root: bool = False) -> list[str]:
+        lines = []
+        
+        if not is_root:
+            # Add folder (skip for root level)
+            lines.append(f"{indent}+-- {path.name}/")
+        
+        # Check if we're in a data folder (only show directories, no files)
+        in_data_folder = any(parent.name in DATA_FOLDER_ONLY for parent in path.parents)
+        
+        # Process contents
+        items = sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name))
+        next_indent = "" if is_root else indent + "|   "
+        
+        for item in items:
+            if item.is_dir():
+                if should_skip_dir(item):
+                    continue
+                    
+                lines.extend(get_structure(item, next_indent))
+            elif not in_data_folder and not is_root:  # Only include files if not in data folder and not root
+                # Check if file is empty
+                is_empty = item.stat().st_size == 0
+                empty_marker = " [empty]" if is_empty else ""
+                lines.append(f"{indent}|-- {item.name}{empty_marker}")
+                
+        return lines
+    
+    try:
+        # Get structure starting from current directory, marking it as root
+        structure = get_structure(Path.cwd(), is_root=True)
+        
+        # Write to file with UTF-8 encoding
+        with open(output, 'w', encoding='utf-8') as f:
+            f.write("\n".join(structure))
+            
+        click.echo(click.style("\nStructure written successfully", fg='green'))
+        
+    except Exception as e:
+        click.echo(click.style(f"\nError generating structure: {e}", fg='red'))
+
+@dev.command()
+@click.option('--output-dir', default="combined_files", help='Output directory for combined files')
+def combine(output_dir: str):
+    """Combine non-empty files within each subfolder into single txt files"""
+    click.echo(f"\nCombining files into directory: {output_dir}")
+    
+    EXCLUDE_DIRS = {
+        '.git', '__pycache__', 'backend',
+        'author_photos', 'book_covers', 'exported_html',
+        'data', 'combined_files'  # Don't process data dir or our output dir
+    }
+    
+    EXCLUDE_EXTENSIONS = {'.pyc', '.db', '.jpg', '.png', '.gif'}
+    
+    def should_skip_dir(path: Path) -> bool:
+        return path.name in EXCLUDE_DIRS or path.name.startswith('.')
+    
+    def should_include_file(path: Path) -> bool:
+        # Skip empty files and files with excluded extensions
+        return (path.stat().st_size > 0 and 
+                path.suffix.lower() not in EXCLUDE_EXTENSIONS and
+                not path.name.startswith('.'))
+    
+    def process_directory(dir_path: Path, output_base: Path, is_root: bool = False):
+        # Skip excluded directories
+        if should_skip_dir(dir_path):
+            return
+            
+        # Collect all non-empty files in this directory
+        files_content = []
+        for item in dir_path.iterdir():
+            if item.is_file() and should_include_file(item):
+                try:
+                    content = item.read_text(encoding='utf-8')
+                    # Get relative path from the root directory
+                    rel_path = str(item.relative_to(Path.cwd())).replace('/', '\\')
+                    
+                    # Check if content already starts with a separator
+                    header = f"# {rel_path}\n\n"
+                    if not content.startswith("# "):
+                        files_content.append(f"{header}{content}\n\n")
+                    else:
+                        files_content.append(f"{content}\n\n")
+                except Exception as e:
+                    click.echo(click.style(f"Error reading {item}: {e}", fg='yellow'))
+        
+        # If we found any files, combine them
+        if files_content and not is_root:
+            # Create simplified filename from directory path
+            rel_dir = str(dir_path.relative_to(Path.cwd()))
+            simplified_name = rel_dir.replace('\\', '-').replace('/', '-') + '.txt'
+            
+            output_file = output_base / simplified_name
+            try:
+                output_file.write_text("\n".join(files_content), encoding='utf-8')
+                click.echo(f"Created combined file: {output_file}")
+            except Exception as e:
+                click.echo(click.style(f"Error writing {output_file}: {e}", fg='red'))
+        
+        # Process subdirectories
+        for item in dir_path.iterdir():
+            if item.is_dir():
+                process_directory(item, output_base, False)
+    
+    try:
+        # Create output directory
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # Start processing from current directory
+        process_directory(Path.cwd(), output_path, is_root=True)
+        
+        click.echo(click.style("\nFiles combined successfully", fg='green'))
+        
+    except Exception as e:
+        click.echo(click.style(f"\nError combining files: {e}", fg='red'))
+
+
+# cli\commands\genre.py
+
+import click
+from core.database import GoodreadsDB
+from core.database.queries import BookQueries
+
+@click.group()
+def genre():
+    """Genre management commands"""
+    pass
+
+@genre.command(name="list")
+@click.option('--db-path', '--db', default="books.db", help="Path to the books database")
+@click.argument('genre_name')
+def list_books(db_path: str, genre_name: str):
+    """
+    List all books in a specific genre, including Goodreads votes,
+    ordered by votes (highest first).
+
+    GENRE_NAME is the name of the genre to filter books by.
+    """
+    db = GoodreadsDB(db_path)
+    # Instantiate the BookQueries with our DB instance (which provides execute_query)
+    queries = BookQueries(db)
+    books = queries.get_books_by_genre(genre_name)
+    
+    if books:
+        click.echo(f"\nBooks in genre '{genre_name}':")
+        for book in books:
+            votes = book.get('goodreads_votes')
+            votes_str = f"{votes}" if votes is not None else "N/A"
+            click.echo(f" - {book['title']} (Goodreads ID: {book['goodreads_id']}, Votes: {votes_str})")
+    else:
+        click.echo(f"\nNo books found in genre '{genre_name}'.")
+
+if __name__ == '__main__':
+    genre()
+
+
+
+# core/cli/commands/library.py
+import click
+from core.database import GoodreadsDB
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from core.resolvers.book_resolver import BookResolver
+from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
+from core.sa.repositories.user import UserRepository
+from core.database.queries import get_reading_progress
+import sqlite3
+from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+from datetime import datetime, UTC
+from typing import Dict, Any, List
+
+# Default Calibre database path
+DEFAULT_CALIBRE_PATH = "C:/Users/warre/Calibre Library/metadata.db"
+
+def print_reading_data(data: List[Dict[str, Any]]):
+    """Print reading data in a readable format."""
+    print("\nReading Progress Data:")
+    print("-" * 80)
+    for entry in data:
+        print(f"\nBook: {entry['title']} (Calibre ID: {entry['calibre_id']}, Goodreads ID: {entry['goodreads_id']})")
+        print("Warren:")
+        print(f"  Last Read: {entry['warren_last_read'] or 'Never'}")
+        print(f"  Progress: {entry['warren_read_percent']}%")
+        print("Ruth:")
+        print(f"  Last Read: {entry['ruth_last_read'] or 'Never'}")
+        print(f"  Progress: {entry['ruth_read_percent']}%")
+    print("-" * 80)
+
+def determine_status(read_percent: float) -> str:
+    """Determine reading status based on percentage."""
+    if read_percent is None or read_percent == 0:
+        return "want_to_read"
+    elif read_percent == 100:
+        return "completed"
+    else:
+        return "reading"
+
+@click.group()
+def library():
+    """Library management commands"""
+    pass
+
+@library.command()
+@click.option('--calibre-path', default="C:/Users/warre/Calibre Library/metadata.db", required=True, help='Path to Calibre metadata.db')
+@click.option('--limit', default=None, type=int, help='Limit number of books')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool):
+    """Import books from Calibre library using SQLAlchemy
+    
+    This command uses the SQLAlchemy-based BookCreator to import books from Calibre.
+    It will create book records with proper relationships for authors, genres, and series.
+    
+    Example:
+        cli library import-calibre-sa --calibre-path "path/to/metadata.db"
+        cli library import-calibre-sa --limit 10 --scrape  # Import 10 books with fresh data
+    """
+    # Print initial sync information
+    if verbose:
+        click.echo(click.style("\nImporting from Calibre: ", fg='blue') + 
+                  click.style(calibre_path, fg='cyan'))
+    
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create book creator
+        creator = BookCreator(session, scrape=scrape)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
+        # Get books from Calibre database
+        with sqlite3.connect(calibre_path) as calibre_conn:
+            query = """
+                SELECT 
+                    books.id AS calibre_id,
+                    books.title,
+                    gr.val AS goodreads_id,
+                    isbn.val AS isbn
+                FROM books
+                LEFT JOIN identifiers gr 
+                    ON gr.book = books.id 
+                    AND gr.type = 'goodreads'
+                LEFT JOIN identifiers isbn
+                    ON isbn.book = books.id 
+                    AND isbn.type = 'isbn'
+                WHERE gr.val IS NOT NULL
+            """
+            
+            cursor = calibre_conn.execute(query)
+            calibre_books = cursor.fetchall()
+            
+            if verbose:
+                click.echo(click.style(f"\nFound {len(calibre_books)} total books in Calibre", fg='blue'))
+                if len(calibre_books) > 0:
+                    click.echo(click.style("First book:", fg='blue'))
+                    click.echo(click.style(f"  - Title: {calibre_books[0][1]}", fg='cyan'))
+                    click.echo(click.style(f"  - Goodreads ID: {calibre_books[0][2]}", fg='cyan'))
+                    click.echo(click.style(f"  - ISBN: {calibre_books[0][3]}", fg='cyan'))
+            
+            if limit:
+                calibre_books = calibre_books[:limit]
+            
+            # Process each book
+            with create_progress_bar(calibre_books, verbose, 'Processing books', 
+                                   lambda b: b[1]) as books_iter:
+                for book in books_iter:
+                    calibre_data = {
+                        'calibre_id': book[0],
+                        'title': book[1],
+                        'goodreads_id': book[2],
+                        'isbn': book[3]
+                    }
+                    
+                    try:
+                        # Try to create the book
+                        book_obj = creator.create_book_from_goodreads(calibre_data['goodreads_id'], source='library')
+                        if book_obj:
+                            # Create library entry
+                            library_entry = Library(
+                                title=calibre_data['title'],
+                                calibre_id=calibre_data['calibre_id'],
+                                goodreads_id=calibre_data['goodreads_id'],
+                                work_id=book_obj.work_id,
+                                isbn=calibre_data['isbn']
+                            )
+                            session.add(library_entry)
+                            session.commit()
+                            tracker.increment_imported()
+                        else:
+                            tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                           "Book already exists or was previously scraped")
+                    except Exception as e:
+                        tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                       f"Error: {str(e)}", 'red')
+                    
+                    tracker.increment_processed()
+            
+            # Print results
+            tracker.print_results('books')
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during import: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+@library.command()
+@click.option('--db-path', '--db', default="books.db", help='Path to books database')
+def stats(db_path: str):
+    """Show library statistics"""
+    db = GoodreadsDB(db_path)
+    stats = db.get_stats()
+    
+    click.echo("\nLibrary Statistics:")
+    for table, count in stats.items():
+        click.echo(f"{table}: {count} records")
+
+@library.command()
+@click.argument('goodreads_id')
+@click.option('--db-path', '--db', default="books.db", help='Path to books database')
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+def delete(goodreads_id: str, db_path: str, force: bool):
+    """Delete a book and its relationships from the database"""
+    db = GoodreadsDB(db_path)
+    
+    # Get book details first
+    book = db.get_by_id('book', goodreads_id, id_field='goodreads_id')
+    if not book:
+        click.echo(click.style(f"\nNo book found with ID: {goodreads_id}", fg='red'))
+        return
+        
+    # Show confirmation unless force flag is used
+    if not force:
+        click.confirm(f"\nAre you sure you want to delete '{book['title']}'?", abort=True)
+    
+    if db.delete_book(goodreads_id):
+        click.echo(click.style(f"\nSuccessfully deleted '{book['title']}'", fg='green'))
+    else:
+        click.echo(click.style("\nFailed to delete book", fg='red'))
+
+@library.command()
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompts')
+def empty_db(force: bool):
+    """Empty the database of all records
+    
+    This will delete ALL records from ALL tables. Use with caution.
+    Requires confirmation unless --force is used.
+    
+    Example:
+        cli library empty-db  # Will prompt for confirmation
+        cli library empty-db --force  # No confirmation prompt
+    """
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get counts before deletion
+        counts = {
+            'library': session.query(Library).count(),
+            'books': session.query(Book).count(),
+            'authors': session.query(Author).count(),
+            'genres': session.query(Genre).count(),
+            'series': session.query(Series).count(),
+            'book_authors': session.query(BookAuthor).count(),
+            'book_genres': session.query(BookGenre).count(),
+            'book_series': session.query(BookSeries).count(),
+            'book_scraped': session.query(BookScraped).count()
+        }
+        
+        total_records = sum(counts.values())
+        
+        if total_records == 0:
+            click.echo("Database is already empty.")
+            return
+            
+        # Show what will be deleted
+        click.echo("\nThis will delete:")
+        for table, count in counts.items():
+            click.echo(f"  - {count} records from {table}")
+        click.echo(f"\nTotal: {total_records} records")
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to delete ALL records?", abort=True)
+            click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
+        
+        # Delete in correct order to avoid foreign key constraints
+        click.echo("\nDeleting records...")
+        
+        with click.progressbar(length=9, label='Emptying database') as bar:
+            session.query(BookAuthor).delete()
+            bar.update(1)            
+
+            session.query(BookGenre).delete()
+            bar.update(1)
+            
+            session.query(BookSeries).delete()
+            bar.update(1)
+            
+            session.query(Library).delete()
+            bar.update(1)
+            
+            session.query(Book).delete()
+            bar.update(1)
+            
+            session.query(Author).delete()
+            bar.update(1)
+            
+            session.query(Genre).delete()
+            bar.update(1)
+            
+            session.query(Series).delete()
+            bar.update(1)
+            
+            session.query(BookScraped).delete()
+            bar.update(1)
+        
+        session.commit()
+        click.echo(click.style("\nSuccessfully emptied database", fg='green'))
+        
+    except Exception as e:
+        session.rollback()
+        click.echo(click.style(f"\nError emptying database: {str(e)}", fg='red'))
+        raise
+    finally:
+        session.close()
+
+@library.command()
+@click.argument('source')
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def delete_by_source(source: str, force: bool, verbose: bool):
+    """Delete all books from a specific source
+    
+    This command will delete all books and their relationships that came from the specified source.
+    Common sources are: 'library', 'series', 'goodreads'
+    
+    Example:
+        cli library delete-by-source series  # Delete all books from series
+        cli library delete-by-source library --force  # Delete library books without confirmation
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get count of books to delete
+        count = session.query(Book).filter(Book.source == source).count()
+        
+        if count == 0:
+            click.echo(click.style(f"\nNo books found with source: {source}", fg='yellow'))
+            return
+            
+        # Show what will be deleted
+        click.echo("\n" + click.style(f"This will delete {count} books with source '{source}'", fg='yellow'))
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to delete these books?", abort=True)
+            click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
+        # Get books to delete
+        books = session.query(Book).filter(Book.source == source).all()
+        
+        # Process each book
+        with create_progress_bar(books, verbose, 'Deleting books', 
+                               lambda b: b.title) as books_iter:
+            for book in books_iter:
+                try:
+                    # Delete relationships first
+                    session.query(BookAuthor).filter_by(work_id=book.work_id).delete()
+                    session.query(BookGenre).filter_by(work_id=book.work_id).delete()
+                    session.query(BookSeries).filter_by(work_id=book.work_id).delete()
+                    session.query(Library).filter_by(work_id=book.work_id).delete()
+                    session.query(BookScraped).filter_by(work_id=book.work_id).delete()
+                    
+                    # Delete the book
+                    session.delete(book)
+                    session.commit()
+                    tracker.increment_processed()
+                    
+                except Exception as e:
+                    tracker.add_skipped(book.title, book.goodreads_id,
+                                   f"Error: {str(e)}", 'red')
+                    session.rollback()
+        
+        # Print results
+        tracker.print_results('books')
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during deletion: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+@library.command()
+@click.option('--calibre-path', type=click.Path(exists=True), default=DEFAULT_CALIBRE_PATH, help="Path to Calibre metadata.db (optional)")
+@click.option('--dry-run', is_flag=True, help="Print data without making changes")
+def sync_reading(calibre_path: str, dry_run: bool):
+    """Sync reading progress from Calibre database
+    
+    Example:
+        cli library sync-reading  # Sync with default Calibre path
+        cli library sync-reading --calibre-path "path/to/metadata.db"  # Use custom path
+        cli library sync-reading --dry-run  # Preview changes without applying them
+    """
+    # Get reading progress data
+    data = get_reading_progress(calibre_path)
+    
+    # Print the data
+    print_reading_data(data)
+    
+    if dry_run:
+        print("\nDry run - no changes made")
+        return
+        
+    # Initialize database
+    db = Database()
+    session: Session = db.get_session()
+    user_repo = UserRepository(session)
+    
+    try:
+        # Get or create users
+        warren = user_repo.get_or_create_user("Warren")
+        ruth = user_repo.get_or_create_user("Ruth")
+        
+        print(f"\nUsers:")
+        print(f"Warren (ID: {warren.id})")
+        print(f"Ruth (ID: {ruth.id})")
+        
+        # Process each book
+        total_processed = 0
+        warren_updates = 0
+        ruth_updates = 0
+        
+        for entry in data:
+            print(f"\nProcessing book: {entry['title']}")
+            
+            # Update Warren's status if there's progress
+            if entry['warren_read_percent'] > 0:
+                status = determine_status(entry['warren_read_percent'])
+                print(f"Warren's status: {status} ({entry['warren_read_percent']}%)")
+                result = user_repo.update_book_status(
+                    user_id=warren.id,
+                    goodreads_id=entry['goodreads_id'],
+                    status=status,
+                    source="calibre",
+                    started_at=None,  # We don't have this information
+                    finished_at=entry['warren_last_read'] if status == "completed" else None
+                )
+                if result:
+                    warren_updates += 1
+                    print("Warren's status updated")
+                else:
+                    print("Failed to update Warren's status")
+            
+            # Update Ruth's status if there's progress
+            if entry['ruth_read_percent'] > 0:
+                status = determine_status(entry['ruth_read_percent'])
+                print(f"Ruth's status: {status} ({entry['ruth_read_percent']}%)")
+                result = user_repo.update_book_status(
+                    user_id=ruth.id,
+                    goodreads_id=entry['goodreads_id'],
+                    status=status,
+                    source="calibre",
+                    started_at=None,  # We don't have this information
+                    finished_at=entry['ruth_last_read'] if status == "completed" else None
+                )
+                if result:
+                    ruth_updates += 1
+                    print("Ruth's status updated")
+                else:
+                    print("Failed to update Ruth's status")
+                    
+            total_processed += 1
+        
+        print(f"\nSync Results:")
+        print(f"Total books processed: {total_processed}")
+        print(f"Warren's updates: {warren_updates}")
+        print(f"Ruth's updates: {ruth_updates}")
+        
+    finally:
+        session.close()
+
+@library.command()
+@click.argument('table', type=click.Choice(['book', 'author', 'series', 'library', 'book-similar']))
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def reset_sync(table: str, force: bool, verbose: bool):
+    """Reset the sync date for all records in a table
+    
+    This will set last_synced_at (or similar_synced_at for book-similar) to NULL for all records,
+    causing them to be picked up by the next sync operation.
+    
+    Valid tables are:
+    - book: Reset last_synced_at for all books
+    - book-similar: Reset similar_synced_at for all books
+    - author: Reset sync dates for all authors
+    - series: Reset sync dates for all series
+    - library: Reset sync dates for all library entries
+    
+    Example:
+        cli library reset-sync series  # Reset series sync dates
+        cli library reset-sync book --force  # Reset book sync dates without confirmation
+        cli library reset-sync book-similar  # Reset similar book sync dates
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Special handling for book-similar which uses a different column
+        if table == 'book-similar':
+            # Get count of records to reset
+            count = session.query(Book).filter(
+                (Book.similar_synced_at.isnot(None)) | 
+                (Book.similar_synced_at == '')
+            ).count()
+            
+            if count == 0:
+                click.echo(click.style("\nNo books found with similar sync dates to reset", fg='yellow'))
+                return
+                
+            # Show what will be reset
+            click.echo("\n" + click.style(f"This will reset the similar sync date for {count} books", fg='yellow'))
+            
+            # Confirm unless force flag is used
+            if not force:
+                click.confirm("\nAre you sure you want to reset these similar sync dates?", abort=True)
+            
+            # Reset all similar sync dates in a single update
+            session.query(Book).filter(
+                (Book.similar_synced_at.isnot(None)) | 
+                (Book.similar_synced_at == '')
+            ).update({Book.similar_synced_at: None}, synchronize_session=False)
+            
+            # Commit the changes
+            session.commit()
+            
+            # Print results
+            click.echo("\n" + click.style("Results:", fg='blue'))
+            click.echo(click.style("Reset: ", fg='blue') + 
+                      click.style(str(count), fg='green') + 
+                      click.style(" book similar sync dates", fg='blue'))
+            return
+            
+        # Regular sync date handling for other tables
+        table_map = {
+            'book': Book,
+            'author': Author,
+            'series': Series,
+            'library': Library
+        }
+        
+        model = table_map[table]
+        
+        # Get count of records to reset - include both non-null and empty string values
+        count = session.query(model).filter(
+            (model.last_synced_at.isnot(None)) | 
+            (model.last_synced_at == '')
+        ).count()
+        
+        if count == 0:
+            click.echo(click.style(f"\nNo {table} records found with sync dates to reset", fg='yellow'))
+            return
+            
+        # Show what will be reset
+        click.echo("\n" + click.style(f"This will reset the sync date for {count} {table} records", fg='yellow'))
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to reset these sync dates?", abort=True)
+        
+        # Reset all sync dates in a single update
+        session.query(model).filter(
+            (model.last_synced_at.isnot(None)) | 
+            (model.last_synced_at == '')
+        ).update({model.last_synced_at: None}, synchronize_session=False)
+        
+        # Commit the changes
+        session.commit()
+        
+        # Print results
+        click.echo("\n" + click.style("Results:", fg='blue'))
+        click.echo(click.style("Reset: ", fg='blue') + 
+                  click.style(str(count), fg='green') + 
+                  click.style(f" {table} records", fg='blue'))
+                      
+    except Exception as e:
+        session.rollback()
+        click.echo("\n" + click.style(f"Error during reset: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+
+# core/cli/commands/scraper.py
+import click
+import json
+from pathlib import Path
+from core.scrapers.book_scraper import BookScraper
+from core.scrapers.author_scraper import AuthorScraper
+from core.scrapers.author_books_scraper import AuthorBooksScraper
+from core.scrapers.series_scraper import SeriesScraper
+from core.scrapers.editions_scraper import EditionsScraper
+from core.scrapers.similar_scraper import SimilarScraper
+
+@click.group()
+def scraper():
+    """Commands for testing scrapers"""
+    # Ensure data directories exist
+    Path('data/cache/book/show').mkdir(parents=True, exist_ok=True)
+    Path('data/cache/author/show').mkdir(parents=True, exist_ok=True)
+    Path('data/cache/author/list').mkdir(parents=True, exist_ok=True)
+    Path('data/cache/series/show').mkdir(parents=True, exist_ok=True)
+    Path('data/cache/work/editions').mkdir(parents=True, exist_ok=True)
+    Path('data/cache/book/similar').mkdir(parents=True, exist_ok=True)
+
+@scraper.command()
+@click.argument('book_id')
+@click.option('--scrape/--no-scrape', default=False)
+def book(book_id: str, scrape: bool):
+    """Test book scraper output"""
+    click.echo(f"\nTesting book scraper with ID: {book_id} (scrape={scrape})")
+    
+    scraper = BookScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_book(book_id)
+    
+    if result:
+        click.echo(click.style("\nBook Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get book data", fg='red'))
+
+@scraper.command()
+@click.argument('author_id')
+@click.option('--scrape/--no-scrape', default=False)
+def author(author_id: str, scrape: bool):
+    """Test author scraper output"""
+    click.echo(f"\nTesting author scraper with ID: {author_id} (scrape={scrape})")
+    
+    scraper = AuthorScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_author(author_id)
+    
+    if result:
+        click.echo(click.style("\nAuthor Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get author data", fg='red'))
+
+@scraper.command()
+@click.argument('author_id')
+@click.option('--scrape/--no-scrape', default=False)
+def author_books(author_id: str, scrape: bool):
+    """Test author books scraper output"""
+    click.echo(f"\nTesting author books scraper with ID: {author_id} (scrape={scrape})")
+    
+    scraper = AuthorBooksScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_author_books(author_id)
+    
+    if result:
+        click.echo(click.style("\nAuthor Books Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get author books data", fg='red'))
+
+@scraper.command()
+@click.argument('series_id')
+@click.option('--scrape/--no-scrape', default=False)
+def series(series_id: str, scrape: bool):
+    """Test series scraper output"""
+    click.echo(f"\nTesting series scraper with ID: {series_id} (scrape={scrape})")
+    
+    scraper = SeriesScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_series(series_id)
+    
+    if result:
+        click.echo(click.style("\nSeries Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get series data", fg='red'))
+
+@scraper.command()
+@click.argument('work_id')
+@click.option('--scrape/--no-scrape', default=False)
+def editions(work_id: str, scrape: bool):
+    """Test editions scraper output"""
+    click.echo(f"\nTesting editions scraper with ID: {work_id} (scrape={scrape})")
+    
+    scraper = EditionsScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_editions(work_id)
+    
+    if result:
+        click.echo(click.style("\nEditions Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get editions data", fg='red'))
+        
+@scraper.command()
+@click.argument('book_id')
+@click.option('--scrape/--no-scrape', default=False)
+def similar(book_id: str, scrape: bool):
+    """Test similar books scraper output"""
+    click.echo(f"\nTesting similar books scraper with ID: {book_id} (scrape={scrape})")
+    
+    scraper = SimilarScraper(scrape=scrape)  # Pass the scrape flag
+    result = scraper.scrape_similar_books(book_id)
+    
+    if result:
+        click.echo(click.style("\nSimilar Books Data:", fg='green'))
+        # Pretty print the result
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(click.style("\nFailed to get similar books data", fg='red'))
+
+
+# cli\commands\series.py
+
+import click
+from core.database import GoodreadsDB
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from core.scrapers.series_scraper import SeriesScraper
+from core.sa.repositories.series import SeriesRepository
+from core.sa.models import Series
+from core.exclusions import should_exclude_book, get_exclusion_reason
+from datetime import datetime
+from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+
+@click.group()
+def series():
+    """Series management commands"""
+    pass
+
+@series.command()
+@click.option('--days', default=30, help='Sync series not updated in this many days')
+@click.option('--limit', default=None, type=int, help='Limit number of series to sync')
+@click.option('--source', default=None, help='Only sync series with books from this source (e.g. library)')
+@click.option('--goodreads-id', default=None, help='Sync a specific series by Goodreads ID')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool):
+    """Sync unsynced series and import their books using SQLAlchemy
+    
+    This command uses the SQLAlchemy-based BookCreator to import books from series.
+    It will create book records with proper relationships for authors, genres, and series.
+    
+    Example:
+        cli series sync-sa --days 7  # Sync series not updated in 7 days
+        cli series sync-sa --limit 10 --scrape  # Sync 10 series with fresh data
+        cli series sync-sa --source library  # Only sync series with books from library
+        cli series sync-sa --goodreads-id 45175  # Sync specific series by ID
+    """
+    # Print initial sync information
+    print_sync_start(days, limit, source, goodreads_id, 'series', verbose)
+
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create repositories and services
+        series_repo = SeriesRepository(session)
+        creator = BookCreator(session, scrape=scrape)
+        series_scraper = SeriesScraper(scrape=scrape)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
+        # Get series to sync
+        if goodreads_id:
+            # Get or create the specific series
+            series = series_repo.get_by_goodreads_id(goodreads_id)
+            if not series:
+                # Try to get series data to create new series
+                series_data = series_scraper.scrape_series(goodreads_id)
+                if series_data:
+                    series = Series(
+                        goodreads_id=goodreads_id,
+                        title=series_data.get('title')
+                    )
+                    session.add(series)
+                    session.commit()
+                else:
+                    click.echo(click.style(f"\nFailed to find or create series with ID: {goodreads_id}", fg='red'))
+                    return
+            series_to_sync = [series]
+        else:
+            # Get series that need updating
+            series_to_sync = series_repo.get_series_needing_sync(days, limit, source)
+        
+        if verbose:
+            click.echo(click.style(f"\nFound {len(series_to_sync)} series to sync", fg='blue'))
+        
+        # Process each series
+        with create_progress_bar(series_to_sync, verbose, 'Processing series', 
+                               lambda s: s.title) as series_iter:
+            for series in series_iter:
+                try:
+                    # Get series data
+                    series_data = series_scraper.scrape_series(series.goodreads_id)
+                    if not series_data:
+                        tracker.add_skipped(series.title, series.goodreads_id,
+                                         "Failed to scrape series data", 'red')
+                        continue
+                    
+                    # Process each book in the series
+                    for book_data in series_data['books']:
+                        try:
+                            # Create the book
+                            book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='series')
+                            if book:
+                                tracker.increment_imported()
+                            else:
+                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                                "Book already exists or was previously scraped")
+                        except Exception as e:
+                            tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
+                                            f"Error: {str(e)}", 'red')
+
+                    # Update series last_synced_at
+                    update_last_synced(series, session)
+                    tracker.increment_processed()
+                    
+                except Exception as e:
+                    tracker.add_skipped(series.title, series.goodreads_id,
+                                    f"Error: {str(e)}", 'red')
+        
+        # Print results
+        tracker.print_results('series')
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during sync: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+@series.command()
+@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def reset_sync(force: bool, verbose: bool):
+    """Reset the sync date for all series
+    
+    This will set last_synced_at to NULL for all series, causing them to be
+    picked up by the next sync operation.
+    
+    Example:
+        cli series reset-sync  # Reset with confirmation
+        cli series reset-sync --force  # Reset without confirmation
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get count of series to reset - include both non-null and empty string values
+        count = session.query(Series).filter(
+            (Series.last_synced_at.isnot(None)) | 
+            (Series.last_synced_at == '')
+        ).count()
+        
+        if count == 0:
+            click.echo(click.style("\nNo series found with sync dates to reset", fg='yellow'))
+            return
+            
+        # Show what will be reset
+        click.echo("\n" + click.style(f"This will reset the sync date for {count} series", fg='yellow'))
+        
+        # Confirm unless force flag is used
+        if not force:
+            click.confirm("\nAre you sure you want to reset these sync dates?", abort=True)
+        
+        # Reset all sync dates in a single update
+        session.query(Series).filter(
+            (Series.last_synced_at.isnot(None)) | 
+            (Series.last_synced_at == '')
+        ).update({Series.last_synced_at: None}, synchronize_session=False)
+        
+        # Commit the changes
+        session.commit()
+        
+        # Print results
+        click.echo("\n" + click.style("Results:", fg='blue'))
+        click.echo(click.style("Reset: ", fg='blue') + 
+                  click.style(str(count), fg='green') + 
+                  click.style(" series", fg='blue'))
+                      
+    except Exception as e:
+        session.rollback()
+        click.echo("\n" + click.style(f"Error during reset: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+
+
+# cli/commands/similar.py
+
+import click
+from sqlalchemy.orm import Session
+from core.sa.database import Database
+from core.resolvers.book_creator import BookCreator
+from core.scrapers.similar_scraper import SimilarScraper
+from core.sa.repositories.book import BookRepository
+from core.sa.models import Book, BookSimilar, BookScraped
+from ..utils import ProgressTracker, print_sync_start, create_progress_bar
+from datetime import datetime, UTC
+
+@click.group()
+def similar():
+    """Similar books management commands"""
+    pass
+
+@similar.command()
+@click.option('--limit', default=None, type=int, help='Limit number of books to process')
+@click.option('--source', default=None, help='Only sync similar books for books from this source (e.g. library)')
+@click.option('--goodreads-id', default=None, help='Sync similar books for a specific book by Goodreads ID')
+@click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool):
+    """Sync similar books relationships using SQLAlchemy
+    
+    This command finds and creates relationships between similar books using Goodreads data.
+    
+    Example:
+        cli similar sync-sa --source library  # Sync similar books for library books
+        cli similar sync-sa --limit 10 --scrape  # Sync 10 books with fresh data
+        cli similar sync-sa --goodreads-id 18541  # Sync similar books for specific book
+    """
+    # Print initial sync information
+    print_sync_start(None, limit, source, goodreads_id, 'books', verbose)
+
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Create repositories and services
+        book_repo = BookRepository(session)
+        creator = BookCreator(session, scrape=scrape)
+        similar_scraper = SimilarScraper(scrape=scrape)
+        
+        # Initialize progress tracker
+        tracker = ProgressTracker(verbose)
+        
+        # Get books to process
+        if goodreads_id:
+            # Get specific book
+            book = book_repo.get_by_goodreads_id(goodreads_id)
+            if not book:
+                click.echo(click.style(f"\nNo book found with ID: {goodreads_id}", fg='red'))
+                return
+            books_to_process = [book]
+        else:
+            # Get books without similar books processed
+            books_to_process = book_repo.get_books_without_similar(source)
+            if limit:
+                books_to_process = books_to_process[:limit]
+        
+        if verbose:
+            click.echo(click.style(f"\nFound {len(books_to_process)} books to process", fg='blue'))
+        
+        # Process each book
+        with create_progress_bar(books_to_process, verbose, 'Processing books', 
+                               lambda b: b.title) as books_iter:
+            for book in books_iter:
+                try:
+                    # Get similar books data
+                    similar_books = similar_scraper.scrape_similar_books(book.work_id)
+                    if not similar_books:
+                        tracker.add_skipped(book.title, book.goodreads_id,
+                                         "Failed to get similar books data", 'red')
+                        tracker.increment_processed()
+                        continue
+                    
+                    similar_count = 0
+                    total_similar = len(similar_books)
+                    
+                    # Create a nested progress bar for similar books if verbose
+                    if verbose:
+                        click.echo(click.style(f"\nProcessing {total_similar} similar books for: ", fg='blue') + 
+                                 click.style(book.title, fg='cyan'))
+                    
+                    # Process each similar book
+                    for i, similar_book_data in enumerate(similar_books, 1):
+                        try:
+                            # Try to create the similar book; if already scraped, it may return None
+                            similar_book = creator.create_book_from_goodreads(
+                                similar_book_data['goodreads_id'], 
+                                source='similar'
+                            )
+                            if similar_book is None:
+                                # Look up the scraped entry to get the work_id
+                                scraped = session.query(BookScraped).filter_by(
+                                    goodreads_id=similar_book_data['goodreads_id']
+                                ).first()
+                                if scraped and scraped.work_id:
+                                    # Look up the book record in the Book table
+                                    similar_book = book_repo.get_by_work_id(scraped.work_id)
+                            
+                            # Only proceed if we found a valid Book record
+                            if similar_book:
+                                # Create relationship if it doesn't already exist
+                                if not session.query(BookSimilar).filter_by(
+                                    work_id=book.work_id,
+                                    similar_work_id=similar_book.work_id
+                                ).first():
+                                    similar_rel = BookSimilar(
+                                        work_id=book.work_id,
+                                        similar_work_id=similar_book.work_id
+                                    )
+                                    session.add(similar_rel)
+                                    session.commit()
+                                    similar_count += 1
+                                    tracker.increment_imported()
+                            else:
+                                tracker.add_skipped(
+                                    similar_book_data.get('title', 'Unknown'),
+                                    similar_book_data.get('goodreads_id', 'Unknown'),
+                                    "No matching book found in Book table",
+                                    'red'
+                                )
+                            
+                            # Update progress for verbose mode
+                            if verbose:
+                                click.echo(
+                                    click.style(f"  {i}/{total_similar}: ", fg='blue') +
+                                    click.style(similar_book_data.get('title', 'Unknown'), fg='cyan')
+                                )
+                            
+                        except Exception as e:
+                            tracker.add_skipped(
+                                similar_book_data.get('title', 'Unknown'), 
+                                similar_book_data.get('goodreads_id', 'Unknown'),
+                                f"Error: {str(e)}", 
+                                'red'
+                            )
+                    
+                    if similar_count == 0:
+                        tracker.add_skipped(book.title, book.goodreads_id,
+                                         "No new similar books found")
+                    
+                    # Update similar sync date
+                    book.similar_synced_at = datetime.now(UTC)
+                    session.commit()
+                    
+                    tracker.increment_processed()
+                    
+                except Exception as e:
+                    tracker.add_skipped(book.title, book.goodreads_id,
+                                    f"Error: {str(e)}", 'red')
+                    tracker.increment_processed()
+        
+        # Print results
+        tracker.print_results('books')
+                      
+    except Exception as e:
+        click.echo("\n" + click.style(f"Error during sync: {str(e)}", fg='red'), err=True)
+        raise
+    finally:
+        session.close()
+
+if __name__ == '__main__':
+    similar()
+
+
+
+# cli\commands\__init__.py
+
+from .library import library
+
+__all__ = ['library']
+
+

@@ -4,6 +4,8 @@ from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from typing import Optional
 from bs4 import BeautifulSoup
+from PIL import Image
+from io import BytesIO
 
 @click.group()
 def book():
@@ -72,8 +74,8 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
     scraper = BookScraper(scrape=scrape)
     
     try:
-        # Get all books with image URLs
-        books = repo.get_all_books_with_images()
+        # Get books that need image processing
+        books = repo.get_all_books_with_images(force=force)
         
         # Apply limit if specified
         if limit:
@@ -106,27 +108,39 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
                     if not response.ok:
                         continue
                         
-                    # Save image
-                    image_path = covers_dir / f"{book.work_id}.jpg"
-                    with open(image_path, 'wb') as f:
-                        f.write(response.content)
+                    # Process image
+                    img = Image.open(BytesIO(response.content))
+                    
+                    # Convert to RGB if necessary
+                    if img.mode in ('RGBA', 'P'):
+                        img = img.convert('RGB')
+                    
+                    # Resize if height exceeds max_height
+                    max_height = 300
+                    if img.height > max_height:
+                        ratio = max_height / img.height
+                        new_width = int(img.width * ratio)
+                        img = img.resize((new_width, max_height), Image.Resampling.LANCZOS)
                         
-                    if not image_path.exists():
-                        continue
-                        
+                    # Save as WebP
+                    image_path = covers_dir / f"{book.work_id}.webp"
+                    img.save(image_path, format='WEBP', quality=85, method=6)
+                    
                     # Update database
-                    new_url = f"/covers/{book.work_id}.jpg"
+                    new_url = f"/covers/{book.work_id}.webp"
                     book.image_url = new_url
                     session.add(book)
                     session.commit()
                     
                     click.echo(f"  Updated cover for: {book.title}")
                         
-                except (requests.RequestException, IOError, Exception):
+                except (requests.RequestException, IOError, Exception) as e:
+                    click.echo(f"  Error processing image: {e}")
                     continue
                 
             except Exception as e:
                 session.rollback()
+                click.echo(f"  Error processing book: {e}")
                 continue
                 
     except Exception as e:

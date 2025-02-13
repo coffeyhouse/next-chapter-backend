@@ -4,10 +4,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from datetime import datetime
 
 from core.sa.database import get_db
 from core.sa.repositories.book import BookRepository
 from api.schemas.book import Book, BookList, SeriesList
+from api.schemas.user import BookUserCreate, BookUserUpdate
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -270,3 +272,96 @@ def get_book_by_work_id(
     }
     
     return Book(**response)
+
+@router.post("/{work_id}/status", response_model=Book)
+def update_book_status(
+    work_id: str,
+    user_id: int = Query(..., description="ID of the user updating the status"),
+    status: str = Query(..., description="Reading status (reading, completed)"),
+    source: Optional[str] = Query(None, description="Source of the book (e.g., library, kindle)"),
+    started_at: Optional[datetime] = Query(None, description="When the user started reading"),
+    finished_at: Optional[datetime] = Query(None, description="When the user finished reading"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update a book's reading status for a user.
+    
+    Args:
+        work_id: The work ID of the book
+        user_id: ID of the user updating the status
+        status: Reading status (reading, completed)
+        source: Optional source of the book
+        started_at: Optional start date
+        finished_at: Optional finish date
+        db: Database session
+    
+    Returns:
+        Updated book information including user's reading status
+    """
+    # Validate status
+    valid_statuses = ["reading", "completed"]
+    if status not in valid_statuses:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+    
+    repo = BookRepository(db)
+    
+    # Get the book first to ensure it exists
+    book = repo.get_by_work_id(work_id)
+    if not book:
+        raise HTTPException(status_code=404, detail=f"Book with work_id {work_id} not found")
+    
+    # Update the book status
+    book_user = repo.update_book_status(
+        user_id=user_id,
+        work_id=work_id,
+        status=status,
+        source=source,
+        started_at=started_at,
+        finished_at=finished_at
+    )
+    
+    if not book_user:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update book status"
+        )
+    
+    # Return the updated book with user status
+    return Book(
+        title=book.title,
+        goodreads_id=book.goodreads_id,
+        work_id=book.work_id,
+        source=book.source,
+        pages=book.pages,
+        goodreads_rating=book.goodreads_rating,
+        goodreads_votes=book.goodreads_votes,
+        published_date=book.published_date,
+        published_state=book.published_state,
+        description=book.description,
+        image_url=book.image_url,
+        authors=[
+            {
+                "goodreads_id": ba.author.goodreads_id,
+                "name": ba.author.name
+            }
+            for ba in book.book_authors
+            if ba.role == "Author"
+        ],
+        series=[
+            {
+                "goodreads_id": bs.series.goodreads_id,
+                "title": bs.series.title,
+                "order": bs.series_order
+            }
+            for bs in book.book_series
+        ],
+        user_status={
+            "status": book_user.status,
+            "started_at": book_user.started_at,
+            "finished_at": book_user.finished_at,
+            "source": book_user.source
+        }
+    )

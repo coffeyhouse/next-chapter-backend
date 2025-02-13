@@ -1,3 +1,879 @@
+# core/sa/repositories/author.py
+from typing import Optional, List
+from datetime import datetime, timedelta, UTC
+from sqlalchemy import desc, func, or_
+from sqlalchemy.orm import Session
+from ..models import Author, Book, BookAuthor
+
+class AuthorRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_by_goodreads_id(self, goodreads_id: str) -> Optional[Author]:
+        """Get an author by Goodreads ID"""
+        return self.session.query(Author).filter(Author.goodreads_id == goodreads_id).first()
+
+    def search_authors(self, query: str, limit: int = 20) -> List[Author]:
+        """Search authors by name"""
+        base_query = self.session.query(Author)
+        if query:  # Only apply filter if query is not empty
+            base_query = base_query.filter(Author.name.ilike(f"%{query}%"))
+        return base_query.limit(limit).all()
+
+    def get_recent_authors(self, limit: int = 10) -> List[Author]:
+        """Get recently added authors"""
+        return self.session.query(Author).order_by(
+            desc(Author.created_at)
+        ).limit(limit).all()
+
+    def get_authors_by_book(self, book_id: str) -> List[Author]:
+        """Get all authors for a specific book"""
+        return self.session.query(Author).join(
+            Author.books
+        ).filter(
+            Book.goodreads_id == book_id
+        ).all()
+
+    def get_unsynced_authors(self, days_old: int = 30, source: Optional[str] = None) -> List[Author]:
+        """Get authors not synced within specified days, optionally filtered by book source
+        
+        Args:
+            days_old: Number of days since last sync
+            source: Optional source to filter by (e.g. 'library', 'series')
+            
+        Returns:
+            List of Author objects that need syncing
+        """
+        cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
+        query = self.session.query(Author).filter(
+            (Author.last_synced_at.is_(None)) | 
+            (Author.last_synced_at < cutoff_date)
+        )
+        
+        # If source is specified, only include authors who have books from that source
+        if source:
+            query = query.join(BookAuthor).join(Book).filter(Book.source == source)
+            
+        query = query.order_by(Author.last_synced_at.asc().nullsfirst())
+        
+        authors = query.all()
+        return [author for author in authors if author is not None]
+
+    def get_prolific_authors(self, min_books: int = 5) -> List[Author]:
+        """Get authors with at least the specified number of books"""
+        return self.session.query(Author).join(
+            Author.books
+        ).group_by(
+            Author.goodreads_id
+        ).having(
+            func.count(Book.goodreads_id) >= min_books
+        ).all()
+
+
+# core/sa/repositories/book.py
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from sqlalchemy import select, desc, not_, exists, func, case, and_, or_
+from sqlalchemy.orm import Session, joinedload
+from ..models import Book, Author, Genre, Series, BookSimilar, BookAuthor, BookSeries, BookUser
+
+class BookRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_by_goodreads_id(self, goodreads_id: str) -> Optional[Book]:
+        """Get a book by its Goodreads ID"""
+        return self.session.query(Book).filter(Book.goodreads_id == goodreads_id).first()
+
+    def get_by_work_id(self, work_id: str) -> Optional[Book]:
+        """Get a book by its work ID with all relationships loaded.
+        
+        Args:
+            work_id: The work ID of the book
+            
+        Returns:
+            Book object with loaded relationships (authors, series, genres, similar books, user status)
+            or None if not found
+        """
+        return (
+            self.session.query(Book)
+            .filter(Book.work_id == work_id)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.genres),
+                joinedload(Book.book_users),
+                joinedload(Book.similar_to).joinedload(BookSimilar.similar_book)
+            )
+            .first()
+        )
+
+    def search_books(
+        self, 
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        sort_field: str = "goodreads_votes",
+        sort_order: str = "desc",
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
+        """Search books by title and include author relationships.
+        
+        Args:
+            query: Search query string
+            source: Filter by source
+            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+            sort_order: Sort order (asc or desc)
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of Book objects with loaded author relationships
+        """
+        base_query = self.session.query(Book).options(
+            joinedload(Book.book_authors).joinedload(BookAuthor.author),
+            joinedload(Book.genres),
+            joinedload(Book.series)
+        )
+        
+        if query and query.strip():
+            base_query = base_query.filter(Book.title.ilike(f"%{query}%"))
+            
+        if source:
+            base_query = base_query.filter(Book.source == source)
+        
+        # Apply sorting
+        sort_column = getattr(Book, sort_field)
+        if sort_order == "desc":
+            base_query = base_query.order_by(desc(sort_column))
+        else:
+            base_query = base_query.order_by(sort_column)
+        
+        return base_query.offset(offset).limit(limit).all()
+        
+    def count_books(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None
+    ) -> int:
+        """Count total books matching the search criteria.
+        
+        Args:
+            query: Search query string
+            source: Filter by source
+            
+        Returns:
+            Total count of matching books
+        """
+        base_query = self.session.query(Book)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Book.title.ilike(f"%{query}%"))
+            
+        if source:
+            base_query = base_query.filter(Book.source == source)
+            
+        return base_query.count()
+
+    def get_books_by_author(self, author_id: str) -> List[Book]:
+        """Get all books by a specific author"""
+        return self.session.query(Book).join(
+            Book.authors
+        ).filter(
+            Author.goodreads_id == author_id
+        ).all()
+
+    def get_books_by_genre(self, genre_name: str) -> List[Book]:
+        """Get all books in a specific genre"""
+        return self.session.query(Book).join(
+            Book.genres
+        ).filter(
+            Genre.name == genre_name
+        ).all()
+
+    def get_books_with_rating_above(self, rating: float) -> List[Book]:
+        """Get books with rating above specified threshold"""
+        return self.session.query(Book).filter(
+            Book.goodreads_rating >= rating
+        ).order_by(
+            desc(Book.goodreads_rating)
+        ).all()
+
+    def get_recent_books(self, limit: int = 10) -> List[Book]:
+        """Get recently added books"""
+        return self.session.query(Book).order_by(
+            desc(Book.created_at)
+        ).limit(limit).all()
+
+    def get_books_in_series(self, series_id: str) -> List[Book]:
+        """Get all books in a specific series"""
+        return self.session.query(Book).join(
+            Book.series
+        ).filter(
+            Series.goodreads_id == series_id
+        ).all()
+
+    def get_similar_books(self, work_id: str, limit: int = 10) -> List[Book]:
+        """Get similar books for a given book"""
+        book = self.session.query(Book).filter(Book.work_id == work_id).first()
+        if not book:
+            return []
+        return book.similar_books[:limit]
+
+    def get_books_with_filters(
+        self,
+        min_rating: Optional[float] = None,
+        min_votes: Optional[int] = None,
+        language: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Book]:
+        """Get books matching multiple filter criteria"""
+        query = self.session.query(Book)
+        
+        if min_rating is not None:
+            query = query.filter(Book.goodreads_rating >= min_rating)
+        if min_votes is not None:
+            query = query.filter(Book.goodreads_votes >= min_votes)
+        if language is not None:
+            query = query.filter(Book.language == language)
+            
+        return query.limit(limit).all()
+
+    def get_books_without_similar(self, source: Optional[str] = None) -> List[Book]:
+        """Get books that don't have any similar books synced yet.
+        
+        Args:
+            source: Optional source filter (e.g. 'library' for library books)
+            
+        Returns:
+            List of Book objects that haven't been synced for similar books
+        """
+        # Start with base query
+        query = self.session.query(Book)
+        
+        # Add source filter if specified
+        if source:
+            query = query.filter(Book.source == source)
+        
+        # Filter for books that haven't been synced for similar books
+        query = query.filter(Book.similar_synced_at.is_(None))
+        
+        # Order by rating desc so we process popular books first
+        return query.order_by(desc(Book.goodreads_rating)).all()
+
+    def get_series_with_counts(
+        self,
+        query: Optional[str] = None,
+        user_id: Optional[int] = None,
+        sort_by: str = "book_count",
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[tuple[Series, int, int]]:
+        """Get series with their book counts and user read counts.
+        
+        Args:
+            query: Optional search string to filter series by title
+            user_id: Optional user ID to get read counts for
+            sort_by: Sort by 'book_count' or 'read_count'
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of tuples containing (Series, total_book_count, user_read_count)
+        """
+        # Subquery to count completed books for the user in each series
+        if user_id is not None:
+            user_read_count = (
+                func.count(
+                    func.distinct(
+                        case(
+                            (and_(
+                                BookUser.user_id == user_id,
+                                BookUser.status == "completed"
+                            ), Book.work_id),
+                            else_=None
+                        )
+                    )
+                ).label('user_read_count')
+            )
+        else:
+            # For SQLite, use a simpler expression that always returns 0
+            user_read_count = func.count(None).label('user_read_count')
+            user_read_count = (user_read_count - user_read_count).label('user_read_count')
+
+        base_query = (
+            self.session.query(
+                Series,
+                func.count(func.distinct(Book.work_id)).label('book_count'),
+                user_read_count
+            )
+            .select_from(Series)
+            .join(BookSeries, Series.goodreads_id == BookSeries.series_id)
+            .join(Book, Book.work_id == BookSeries.work_id)
+        )
+        
+        if user_id is not None:
+            base_query = base_query.outerjoin(
+                BookUser,
+                and_(
+                    BookUser.work_id == Book.work_id,
+                    BookUser.user_id == user_id,
+                    BookUser.status == "completed"
+                )
+            )
+        
+        base_query = base_query.group_by(Series)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Series.title.ilike(f"%{query}%"))
+            
+        # Apply sorting
+        if sort_by == "read_count":
+            base_query = base_query.order_by(desc('user_read_count'), desc('book_count'), Series.title)
+        else:  # Default to book_count
+            base_query = base_query.order_by(desc('book_count'), Series.title)
+            
+        return base_query.offset(offset).limit(limit).all()
+        
+    def count_series(self, query: Optional[str] = None) -> int:
+        """Count total number of series.
+        
+        Args:
+            query: Optional search string to filter series by title
+            
+        Returns:
+            Total count of series matching the criteria
+        """
+        base_query = self.session.query(Series)
+        
+        if query and query.strip():
+            base_query = base_query.filter(Series.title.ilike(f"%{query}%"))
+            
+        return base_query.count()
+
+    def get_all_books_with_images(self, force: bool = False) -> List[Book]:
+        """Get books that need image conversion.
+        
+        Args:
+            force: If True, get all books with images regardless of format.
+                  If False, only get books with non-WebP images.
+        
+        Returns:
+            List of Book objects that need image processing
+        """
+        query = self.session.query(Book).filter(Book.image_url.isnot(None))
+        
+        if not force:
+            # Only get books that don't already have WebP images
+            query = query.filter(not_(Book.image_url.like('%.webp')))
+            
+        return query.all()
+
+    def update_book_status(
+        self,
+        user_id: int,
+        work_id: str,
+        status: str,
+        source: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None
+    ) -> Optional[BookUser]:
+        """Update or create a book status for a user.
+        
+        Args:
+            user_id: ID of the user
+            work_id: Work ID of the book
+            status: Reading status (reading, completed)
+            source: Optional source of the book
+            started_at: Optional start date
+            finished_at: Optional finish date
+            
+        Returns:
+            Updated or created BookUser object, or None if book not found
+        """
+        # Get the book first
+        book = self.get_by_work_id(work_id)
+        if not book:
+            return None
+            
+        # Check if status already exists
+        book_user = (
+            self.session.query(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.work_id == work_id
+            )
+            .first()
+        )
+        
+        if book_user:
+            # Update existing status
+            book_user.status = status
+            book_user.source = source
+            book_user.started_at = started_at
+            book_user.finished_at = finished_at
+        else:
+            # Create new status
+            book_user = BookUser(
+                user_id=user_id,
+                work_id=work_id,
+                status=status,
+                source=source,
+                started_at=started_at,
+                finished_at=finished_at
+            )
+            self.session.add(book_user)
+            
+        try:
+            self.session.commit()
+            return book_user
+        except:
+            self.session.rollback()
+            raise
+
+
+# core/sa/repositories/genre.py
+
+from typing import List, Optional
+from sqlalchemy import func, desc
+from sqlalchemy.orm import Session, joinedload
+from core.sa.models import Genre, Book, BookGenre
+
+class GenreRepository:
+    """Repository for managing Genre entities."""
+
+    def __init__(self, session: Session):
+        """Initialize the repository with a database session.
+        
+        Args:
+            session: SQLAlchemy session for database operations
+        """
+        self.session = session
+
+    def get_by_name(self, name: str) -> Optional[Genre]:
+        """Get a genre by its name.
+        
+        Args:
+            name: The name of the genre to retrieve
+            
+        Returns:
+            The Genre object if found, None otherwise
+        """
+        return self.session.query(Genre).filter(Genre.name == name).first()
+
+    def search_genres(self, query: str, limit: int = 20) -> List[Genre]:
+        """Search for genres by name.
+        
+        Args:
+            query: The search query string
+            limit: Maximum number of results to return (default: 20)
+            
+        Returns:
+            List of matching Genre objects
+        """
+        base_query = self.session.query(Genre)
+        if query:
+            base_query = base_query.filter(Genre.name.ilike(f"%{query}%"))
+        return base_query.limit(limit).all()
+
+    def get_genres_by_book(self, goodreads_id: str) -> List[Genre]:
+        """Get all genres associated with a specific book.
+        
+        Args:
+            goodreads_id: The Goodreads ID of the book
+            
+        Returns:
+            List of Genre objects associated with the book
+        """
+        book = self.session.query(Book).filter(Book.goodreads_id == goodreads_id).first()
+        if not book:
+            return []
+        return (
+            self.session.query(Genre)
+            .join(Genre.book_genres)
+            .join(BookGenre.book)
+            .filter(Book.goodreads_id == goodreads_id)
+            .all()
+        )
+
+    def get_popular_genres(self, limit: int = 10) -> List[Genre]:
+        """Get genres ordered by number of associated books.
+        
+        Args:
+            limit: Maximum number of genres to return (default: 10)
+            
+        Returns:
+            List of Genre objects ordered by popularity
+        """
+        return (self.session.query(Genre)
+                .outerjoin(Genre.book_genres)
+                .group_by(Genre)
+                .order_by(desc(func.count(BookGenre.work_id)))
+                .options(joinedload(Genre.book_genres).joinedload(BookGenre.book))
+                .limit(limit)
+                .all())
+
+    def get_recent_genres(self, limit: int = 10) -> List[Genre]:
+        """Get recently added genres.
+        
+        Args:
+            limit: Maximum number of genres to return (default: 10)
+            
+        Returns:
+            List of Genre objects ordered by creation date
+        """
+        return (self.session.query(Genre)
+                .order_by(desc(Genre.created_at))
+                .limit(limit)
+                .all())
+
+    def merge_genres(self, source_name: str, target_name: str) -> Optional[Genre]:
+        """Merge one genre into another.
+        
+        Args:
+            source_name: Name of the genre to merge from
+            target_name: Name of the genre to merge into
+            
+        Returns:
+            The target Genre object if successful, None otherwise
+        """
+        source = self.get_by_name(source_name)
+        target = self.get_by_name(target_name)
+
+        if not source or not target:
+            return None
+
+        # Get all books associated with the source genre
+        source_books = (
+            self.session.query(Book)
+            .join(Book.book_genres)
+            .filter(BookGenre.genre_id == source.id)
+            .all()
+        )
+
+        # Delete all book-genre associations for the source genre
+        self.session.query(BookGenre).filter(BookGenre.genre_id == source.id).delete()
+
+        # Create new book-genre associations with the target genre
+        for book in source_books:
+            # Check if this book is already associated with the target genre
+            existing = (
+                self.session.query(BookGenre)
+                .filter(
+                    BookGenre.work_id == book.work_id,
+                    BookGenre.genre_id == target.id
+                )
+                .first()
+            )
+            if not existing:
+                # Create new association with target genre
+                new_book_genre = BookGenre(
+                    work_id=book.work_id,
+                    genre_id=target.id
+                )
+                self.session.add(new_book_genre)
+
+        # Delete the source genre
+        self.session.delete(source)
+        self.session.commit()
+
+        return target 
+
+
+# core\sa\repositories\library.py
+
+from typing import List, Optional
+from sqlalchemy import func, desc
+from sqlalchemy.orm import Session, joinedload
+from core.sa.models import Library, Book
+
+class LibraryRepository:
+    """Repository for managing Library entities."""
+
+    def __init__(self, session: Session):
+        """Initialize the repository with a database session.
+        
+        Args:
+            session: SQLAlchemy session for database operations
+        """
+        self.session = session
+
+    def get_by_id(self, library_id: int) -> Optional[Library]:
+        """Get a library entry by its ID.
+        
+        Args:
+            library_id: The ID of the library entry to retrieve
+            
+        Returns:
+            The Library object if found, None otherwise
+        """
+        return self.session.query(Library).filter(Library.id == library_id).first()
+
+    def get_by_calibre_id(self, calibre_id: int) -> Optional[Library]:
+        """Get a library entry by its Calibre ID.
+        
+        Args:
+            calibre_id: The Calibre ID to search for
+            
+        Returns:
+            The Library object if found, None otherwise
+        """
+        return self.session.query(Library).filter(Library.calibre_id == calibre_id).first()
+
+    def get_by_goodreads_id(self, goodreads_id: str) -> Optional[Library]:
+        """Get a library entry by its Goodreads ID.
+        
+        Args:
+            goodreads_id: The Goodreads ID to search for
+            
+        Returns:
+            The Library object if found, None otherwise
+        """
+        return self.session.query(Library).filter(Library.goodreads_id == goodreads_id).first()
+
+    def get_by_isbn(self, isbn: str) -> List[Library]:
+        """Get library entries by ISBN.
+        
+        Args:
+            isbn: The ISBN to search for
+            
+        Returns:
+            List of Library objects with matching ISBN
+        """
+        return self.session.query(Library).filter(Library.isbn == isbn).all()
+
+    def search_by_title(self, query: str, limit: int = 20) -> List[Library]:
+        """Search for library entries by title.
+        
+        Args:
+            query: The search query string
+            limit: Maximum number of results to return (default: 20)
+            
+        Returns:
+            List of matching Library objects
+        """
+        return (
+            self.session.query(Library)
+            .filter(Library.title.ilike(f"%{query}%"))
+            .limit(limit)
+            .all()
+        )
+
+    def get_library_with_book(self, library_id: int) -> Optional[Library]:
+        """Get a library entry with its associated book relationship.
+        
+        Args:
+            library_id: The ID of the library entry
+            
+        Returns:
+            The Library object with loaded book relationship if found, None otherwise
+        """
+        return (
+            self.session.query(Library)
+            .options(joinedload(Library.book))
+            .filter(Library.id == library_id)
+            .first()
+        )
+
+    def get_all_by_work_id(self, work_id: str) -> List[Library]:
+        """Get all library entries for a specific work ID.
+        
+        Args:
+            work_id: The work ID to search for
+            
+        Returns:
+            List of Library objects with matching work ID
+        """
+        return self.session.query(Library).filter(Library.work_id == work_id).all()
+
+    def create_entry(
+        self,
+        title: str,
+        work_id: str,
+        calibre_id: Optional[int] = None,
+        goodreads_id: Optional[str] = None,
+        isbn: Optional[str] = None
+    ) -> Library:
+        """Create a new library entry.
+        
+        Args:
+            title: The title of the book
+            work_id: The work ID of the book
+            calibre_id: Optional Calibre ID
+            goodreads_id: Optional Goodreads ID
+            isbn: Optional ISBN
+            
+        Returns:
+            The created Library object
+        """
+        library = Library(
+            title=title,
+            work_id=work_id,
+            calibre_id=calibre_id,
+            goodreads_id=goodreads_id,
+            isbn=isbn
+        )
+        self.session.add(library)
+        self.session.commit()
+        return library
+
+    def update_entry(
+        self,
+        library_id: int,
+        title: Optional[str] = None,
+        calibre_id: Optional[int] = None,
+        goodreads_id: Optional[str] = None,
+        isbn: Optional[str] = None
+    ) -> Optional[Library]:
+        """Update an existing library entry.
+        
+        Args:
+            library_id: The ID of the library entry to update
+            title: Optional new title
+            calibre_id: Optional new Calibre ID
+            goodreads_id: Optional new Goodreads ID
+            isbn: Optional new ISBN
+            
+        Returns:
+            The updated Library object if found, None otherwise
+        """
+        library = self.get_by_id(library_id)
+        if not library:
+            return None
+
+        if title is not None:
+            library.title = title
+        if calibre_id is not None:
+            library.calibre_id = calibre_id
+        if goodreads_id is not None:
+            library.goodreads_id = goodreads_id
+        if isbn is not None:
+            library.isbn = isbn
+
+        self.session.commit()
+        return library
+
+    def delete_entry(self, library_id: int) -> bool:
+        """Delete a library entry.
+        
+        Args:
+            library_id: The ID of the library entry to delete
+            
+        Returns:
+            True if the entry was deleted, False if not found
+        """
+        library = self.get_by_id(library_id)
+        if not library:
+            return False
+
+        self.session.delete(library)
+        self.session.commit()
+        return True 
+
+
+# core/sa/repositories/series.py
+
+from typing import Optional, List
+from sqlalchemy.orm import Session, joinedload
+from core.sa.models import Series, Book, BookSeries
+from datetime import datetime, timedelta, UTC
+from sqlalchemy import or_
+
+class SeriesRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_by_goodreads_id(self, goodreads_id: str) -> Optional[Series]:
+        """
+        Fetch a series by its Goodreads ID.
+        """
+        return self.session.query(Series).filter(Series.goodreads_id == goodreads_id).first()
+
+    def search_series(self, query: str, limit: int = 20) -> List[Series]:
+        """
+        Search for series whose titles match the given query (case-insensitive).
+        """
+        return (
+            self.session.query(Series)
+            .filter(Series.title.ilike(f"%{query}%"))
+            .limit(limit)
+            .all()
+        )
+
+    def get_series_with_books(self, goodreads_id: str) -> Optional[Series]:
+        """
+        Retrieve a series by its Goodreads ID along with its associated books.
+        This uses joined loading to minimize additional database queries.
+        """
+        return (
+            self.session.query(Series)
+            .options(
+                joinedload(Series.book_series).joinedload(BookSeries.book)
+            )
+            .filter(Series.goodreads_id == goodreads_id)
+            .first()
+        )
+
+    def get_series_by_book(self, book_id: str) -> List[Series]:
+        """
+        Get all series that include a specific book.
+        """
+        return (
+            self.session.query(Series)
+            .join(Series.book_series)
+            .join(BookSeries.book)
+            .filter(Book.goodreads_id == book_id)
+            .all()
+        )
+
+    def get_recent_series(self, limit: int = 10) -> List[Series]:
+        """
+        Get the most recently added series, ordered by the created_at timestamp.
+        """
+        return (
+            self.session.query(Series)
+            .order_by(Series.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def get_series_needing_sync(self, days: int, limit: Optional[int] = None, source: Optional[str] = None) -> List[Series]:
+        """
+        Get series that haven't been synced in the specified number of days.
+        Optionally filter by source of the books in the series.
+        
+        Args:
+            days: Number of days since last sync
+            limit: Maximum number of series to return
+            source: Only include series with books from this source
+            
+        Returns:
+            List of Series objects that need updating
+        """
+        cutoff_date = datetime.now(UTC) - timedelta(days=days)
+        query = self.session.query(Series).filter(
+            or_(
+                Series.last_synced_at.is_(None),
+                Series.last_synced_at < cutoff_date
+            )
+        )
+        
+        # If source is specified, only include series that have books from that source
+        if source:
+            query = query.join(Series.book_series).join(BookSeries.book).filter(Book.source == source)
+            
+        # Order by last sync date, nulls first
+        query = query.order_by(Series.last_synced_at.asc().nullsfirst())
+            
+        if limit:
+            query = query.limit(limit)
+            
+        return query.all()
+
+
+
+# core\sa\repositories\user.py
+
 from typing import List, Optional
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, desc, and_, or_, case
@@ -1263,3 +2139,11 @@ class UserRepository:
             .order_by(BookSeries.series_order)
             .all()
         ) 
+
+
+# core/sa/repositories/__init__.py
+from .book import BookRepository
+from .author import AuthorRepository
+
+__all__ = ['BookRepository', 'AuthorRepository']
+

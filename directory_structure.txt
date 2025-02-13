@@ -39,7 +39,9 @@
 |-- utils.py
 +-- combined_files/
 |-- api-routes.txt
+|-- api-schemas.txt
 |-- api.txt
+|-- calibre_companion.egg-info.txt
 |-- cli-commands.txt
 |-- cli.txt
 |-- core-database.txt
@@ -53,7 +55,10 @@
 |-- core-utils-proxy.txt
 |-- core-utils.txt
 |-- core.txt
+|-- migrations-versions.txt
+|-- migrations.txt
 |-- tests-test_sa-test_repositories.txt
+|-- tests-test_sa-test_resolvers.txt
 |-- tests-test_sa.txt
 +-- core/
 |   +-- database/
@@ -130,6 +135,13 @@
 |   +-- images/
 |   |   +-- author/
 |   |   +-- book/
++-- migrations/
+|   +-- versions/
+|   |-- a33b00fc340b_add_user_subscription_tables.py
+|   |-- aeb280782a0d_add_bookwanted_table.py
+|-- README
+|-- env.py
+|-- script.py.mako
 +-- tests/
 |   +-- test_sa/
 |   |   +-- test_repositories/

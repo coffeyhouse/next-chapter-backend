@@ -1,0 +1,288 @@
+# core\resolvers\book_creator.py
+
+from typing import Optional, Dict, Any, List, Tuple
+from sqlalchemy.orm import Session
+from ..sa.repositories.book import BookRepository
+from ..sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, BookScraped, Base
+from .book_resolver import BookResolver
+from ..exclusions import should_exclude_book, get_exclusion_reason
+from datetime import datetime, UTC
+
+class BookCreator:
+    def __init__(self, session: Session, scrape: bool = False):
+        self.session = session
+        # Create tables if they don't exist
+        Base.metadata.create_all(session.get_bind())
+        self.book_repository = BookRepository(session)
+        self.resolver = BookResolver(scrape)
+
+    def create_book_from_goodreads(self, goodreads_id: str, source: str = 'goodreads') -> Optional[Book]:
+        """
+        Scrapes a book from Goodreads and creates it in the database
+        
+        Args:
+            goodreads_id: Goodreads ID of the book to scrape and create
+            source: Source of the book (default: 'goodreads')
+            
+        Returns:
+            Created Book object or None if book already exists, was previously scraped, or is excluded
+        """
+                
+        # Check if book has been scraped before
+        already_scraped = self.session.query(BookScraped).filter_by(
+            goodreads_id=goodreads_id
+        ).first()
+        if already_scraped:
+            return None
+
+        # Check if book already exists by goodreads_id
+        existing_book = self.book_repository.get_by_goodreads_id(goodreads_id)
+        if existing_book:
+            return None
+
+        # Resolve book data
+        book_data = self.resolver.resolve_book(goodreads_id)
+        if not book_data:            
+            return None
+
+        # Check exclusions before proceeding
+        exclusion_reason = get_exclusion_reason(book_data)
+        if exclusion_reason:
+            # Still track that we attempted to scrape this book
+            scraped = BookScraped(
+                goodreads_id=goodreads_id,
+                work_id=book_data.get('work_id')
+            )
+            self.session.add(scraped)
+            self.session.commit()
+            return None
+
+        # Track successful scrape
+        scraped = BookScraped(
+            goodreads_id=goodreads_id,
+            work_id=book_data.get('work_id')
+        )
+        self.session.add(scraped)
+        self.session.commit()
+
+        # Check if book exists by work_id
+        work_id = book_data.get('work_id')
+        if work_id:
+            existing_book = self.book_repository.get_by_work_id(work_id)
+            if existing_book:
+                return None
+
+        # Set the source in the book data
+        book_data['source'] = source
+
+        # Create the book
+        return self.create_book(book_data)
+
+    def create_book(self, book_data: Dict[str, Any]) -> Book:
+        """
+        Creates a book and its relationships from provided data
+        
+        Args:
+            book_data: Dictionary containing book data
+            
+        Returns:
+            Created Book object
+        
+        Raises:
+            ValueError: If a book with the same work_id already exists
+        """
+        # Check if book exists by work_id
+        work_id = book_data.get('work_id')
+        if work_id:
+            existing_book = self.book_repository.get_by_work_id(work_id)
+            if existing_book:
+                raise ValueError(f"Book with work_id {work_id} already exists")
+
+        # Create the main book entity
+        book = self._create_book_entity(book_data)
+        self.session.add(book)
+        
+        # Create relationships
+        self._create_author_relationships(book, book_data.get('authors', []))
+        self._create_genre_relationships(book, book_data.get('genres', []))
+        self._create_series_relationships(book, book_data.get('series', []))
+        
+        self.session.commit()
+        return book
+
+    def _create_book_entity(self, book_data: Dict[str, Any]) -> Book:
+        """Creates the main book entity without relationships"""        
+        now = datetime.now(UTC)
+        
+        return Book(
+            goodreads_id=book_data['goodreads_id'],
+            title=book_data['title'],
+            work_id=book_data['work_id'],
+            published_date=self._parse_date(book_data.get('published_date')),
+            published_state=book_data.get('published_state'),
+            language=book_data.get('language'),
+            pages=book_data.get('pages'),
+            isbn=book_data.get('isbn'),
+            goodreads_rating=book_data.get('goodreads_rating'),
+            goodreads_votes=book_data.get('goodreads_votes'),
+            description=book_data.get('description'),
+            image_url=book_data.get('image_url'),
+            source=book_data.get('source', 'goodreads'),
+            hidden=book_data.get('hidden', False),
+            last_synced_at=now
+        )
+
+    def _create_or_get_author(self, author_data: Dict[str, Any]) -> Tuple[Author, bool]:
+        """Creates or retrieves an author. Returns (author, was_created)"""
+        author = self.session.query(Author).filter_by(
+            goodreads_id=author_data['goodreads_id']
+        ).first()
+        
+        created = False
+        if not author:
+            author = Author(
+                goodreads_id=author_data['goodreads_id'],
+                name=author_data['name']
+            )
+            self.session.add(author)
+            created = True
+            
+        return author, created
+
+    def _create_or_get_genre(self, genre_data: Dict[str, Any]) -> Tuple[Genre, bool]:
+        """Creates or retrieves a genre. Returns (genre, was_created)"""
+        genre = self.session.query(Genre).filter_by(
+            name=genre_data['name']
+        ).first()
+        
+        created = False
+        if not genre:
+            genre = Genre(name=genre_data['name'])
+            self.session.add(genre)
+            self.session.flush()  # Need to flush to get the genre.id
+            created = True
+            
+        return genre, created
+
+    def _create_or_get_series(self, series_data: Dict[str, Any]) -> Tuple[Series, bool]:
+        """Creates or retrieves a series. Returns (series, was_created)"""
+        series = self.session.query(Series).filter_by(
+            goodreads_id=series_data['goodreads_id']
+        ).first()
+        
+        created = False
+        if not series:
+            series = Series(
+                goodreads_id=series_data['goodreads_id'],
+                title=series_data.get('name', series_data.get('title'))
+            )
+            self.session.add(series)
+            created = True
+            
+        return series, created
+
+    def _create_author_relationships(self, book: Book, authors_data: List[Dict[str, Any]]) -> None:
+        """Creates author relationships for a book"""
+        for author_data in authors_data:
+            author, _ = self._create_or_get_author(author_data)
+            book_author = BookAuthor(
+                work_id=book.work_id,
+                author_id=author.goodreads_id,
+                role=author_data.get('role')
+            )
+            self.session.add(book_author)
+
+    def _create_genre_relationships(self, book: Book, genres_data: List[Dict[str, Any]]) -> None:
+        """Creates genre relationships for a book"""
+        for genre_data in genres_data:
+            genre, _ = self._create_or_get_genre(genre_data)
+            book_genre = BookGenre(
+                work_id=book.work_id,
+                genre_id=genre.id
+            )
+            self.session.add(book_genre)
+
+    def _create_series_relationships(self, book: Book, series_data: List[Dict[str, Any]]) -> None:
+        """Creates series relationships for a book"""
+        for series_item in series_data:
+            series, _ = self._create_or_get_series(series_item)
+            book_series = BookSeries(
+                work_id=book.work_id,
+                series_id=series.goodreads_id,
+                series_order=series_item.get('order')
+            )
+            self.session.add(book_series)
+
+    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
+        """Parse a date string from various formats"""
+        if not date_str:
+            return None
+            
+        formats = [
+            '%Y-%m-%dT%H:%M:%S.%f',  # 2021-05-04T00:00:00.000000
+            '%Y-%m-%d',              # 2021-05-04
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        return None 
+
+
+# core/resolvers/book_resolver.py
+
+from core.scrapers.book_scraper import BookScraper
+from core.scrapers.editions_scraper import EditionsScraper
+
+class BookResolver:
+    def __init__(self, scrape: bool = False):
+        self.book_scraper = BookScraper(scrape=scrape)
+        self.editions_scraper = EditionsScraper(scrape=scrape)
+
+    def resolve_book(self, goodreads_id: str) -> dict:
+        """
+        Resolves the final book data by:
+          1. Scraping the main book page using the given Goodreads id.
+          2. Scraping the editions page using the work id from the main book data.
+          3. Choosing the first edition from the editions result.
+          4. Fully scraping that chosen edition page (using its Goodreads id) to
+             get complete details, which replace the original book data.
+        
+        Returns:
+            A dictionary with the final, fully scraped book details, or None if no editions found.
+        """
+        # Step 1: Scrape the main book page.
+        main_book_data = self.book_scraper.scrape_book(goodreads_id)
+        if not main_book_data:
+            print(f"Failed to scrape the main book page for ID: {goodreads_id}")
+            return None
+
+        # Step 2: Use the work id from the main book data to scrape the editions page.
+        work_id = main_book_data.get('work_id')
+        if not work_id:
+            print("No work id found")
+            return None
+
+        editions = self.editions_scraper.scrape_editions(work_id)
+        if not editions:
+            print("No editions found")
+            return None
+
+        # Step 3: Choose the first edition from the list.
+        chosen_edition = editions[0]
+        chosen_goodreads_id = chosen_edition.get('goodreads_id')
+        if not chosen_goodreads_id:
+            print("Chosen edition has no Goodreads id")
+            return None
+
+        # Step 4: Fully scrape the chosen edition page.
+        final_book_data = self.book_scraper.scrape_book(chosen_goodreads_id)
+        if not final_book_data:
+            print("Failed to fully scrape chosen edition")
+            return None
+
+        return final_book_data
+
+
