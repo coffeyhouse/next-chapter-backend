@@ -21,6 +21,8 @@ EXCLUSION_RULES = {
         "novel collection",
         "Collection Set",
         "Book Set",
+        "free preview",
+        "other stories"
     ],     
     "max_pages": 1800,                     # Exclude books with more than 1800 pages
 }
@@ -42,7 +44,14 @@ def get_exclusion_reason(book: dict) -> Optional[str]:
             r'novellas?\s*\d+\s*-\s*\d+',  # "Novellas 1-10", "Novella 1 - 3"
             r'set.*\d+\s*-\s*\d+',         # "Set 1-3", "Set 1 - 3"
             r'books?\s*\d+',               # "Books 1", "Book 2"
-            r'volume[s\s]+\d+\s*-\s*\d+'   # "Volumes 1-3", "Volume 1 - 3"
+            r'volume[s\s]+\d+\s*-\s*\d+',  # "Volumes 1-3", "Volume 1 - 3"
+            r'series.*set of \d+',         # "The Shepherd King Series, Set of 2 Books"
+            r'series \d+ books',           # "Once Upon a Broken Heart Series 3 Books"
+            r'\d+ books collection set',    # "3 Books Collection Set"
+            r'\d+ books hardcover collection',  # "3 Books Hardcover Collection"
+            r'series.*collection set',      # "Series Collection Set"
+            r'.*\d+\s*books.*collection',   # Any title with "X books" and "collection"
+            r'.*series.*set of.*books'      # Any series with "set of X books"
         ]
         
         for pattern in number_patterns:

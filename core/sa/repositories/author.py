@@ -1,9 +1,9 @@
 # core/sa/repositories/author.py
 from typing import Optional, List
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import desc, func, or_
+from sqlalchemy import desc, func, or_, distinct
 from sqlalchemy.orm import Session
-from ..models import Author, Book, BookAuthor
+from ..models import Author, Book, BookAuthor, BookUser
 
 class AuthorRepository:
     def __init__(self, session: Session):
@@ -39,7 +39,9 @@ class AuthorRepository:
         
         Args:
             days_old: Number of days since last sync
-            source: Optional source to filter by (e.g. 'library', 'series')
+            source: Optional source to filter by (e.g. 'library', 'series', 'read', 'top')
+                   'read' will find authors of books that any user has read
+                   'top' will find authors of highly voted books on Goodreads
             
         Returns:
             List of Author objects that need syncing
@@ -52,7 +54,34 @@ class AuthorRepository:
         
         # If source is specified, only include authors who have books from that source
         if source:
-            query = query.join(BookAuthor).join(Book).filter(Book.source == source)
+            if source == 'read':
+                # Find authors of books that any user has read
+                query = (
+                    query
+                    .join(BookAuthor)
+                    .join(Book)
+                    .join(BookUser)
+                    .filter(BookUser.status == 'completed')
+                    .distinct()
+                )
+            elif source == 'top':
+                # Find authors of highly voted books
+                # Join with books and get max votes per author
+                query = (
+                    query
+                    .join(BookAuthor)
+                    .join(Book)
+                    .filter(
+                        Book.goodreads_votes.isnot(None),
+                        Book.published_date >= '2000-01-01',  # Only books published after 2000
+                        Book.published_date.isnot(None)  # Ensure we have a publication date
+                    )
+                    .group_by(Author.goodreads_id)
+                    .having(func.max(Book.goodreads_votes) >= 10000)  # Minimum vote threshold
+                    .order_by(desc(func.max(Book.goodreads_votes)))
+                )
+            else:
+                query = query.join(BookAuthor).join(Book).filter(Book.source == source)
             
         query = query.order_by(Author.last_synced_at.asc().nullsfirst())
         

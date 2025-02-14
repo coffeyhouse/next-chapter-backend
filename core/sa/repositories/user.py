@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, desc, and_, or_, case
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries, BookSimilar, Series, BookWanted, UserAuthorSubscription, UserSeriesSubscription, Author
+from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries, BookSimilar, Series, BookWanted, UserAuthorSubscription, UserSeriesSubscription, Author, Series, BookGenre, Genre
 
 class UserRepository:
     """Repository for managing User entities."""
@@ -160,7 +160,7 @@ class UserRepository:
         Returns:
             The User object if found, None otherwise
         """
-        return self.session.query(User).filter(User.id == user_id).first()
+        return self.session.query(User).filter(User.id == user_id).one_or_none()
 
     def search_users(self, query: str, limit: int = 20) -> List[User]:
         """Search for users by name.
@@ -574,95 +574,110 @@ class UserRepository:
     def get_recommended_books(
         self,
         user_id: int,
+        days: Optional[int] = None,
         limit: int = 20,
         offset: int = 0
     ) -> List[tuple[Book, int, List[tuple[str, int]]]]:
-        """Get book recommendations based on user's genre preferences.
-        
-        For each unread book, calculates a score based on the user's genre reading history.
-        The score is the sum of how many times the user has read books in each of the book's genres.
-        'Audiobook' genre is excluded from all calculations.
+        """
+        Get recommended books for a user based on their reading history.
+        Books are scored based on how many times the user has read books in each genre.
+        Only includes published books (where source is not None and published_state is 'published' or None).
         
         Args:
             user_id: The ID of the user
-            limit: Maximum number of results to return
-            offset: Number of records to skip
+            days: Optional. If provided, only consider books read within this many days
+            limit: Maximum number of books to return
+            offset: Number of books to skip
             
         Returns:
-            List of tuples containing (Book, total_score, list of (genre_name, genre_score))
-            ordered by total_score descending
+            List of tuples containing:
+            - Book object
+            - Total score (sum of genre weights)
+            - List of tuples with genre name and score
         """
-        # First get genre counts from user's read books
-        read_books = (
-            self.session.query(Book)
-            .join(BookUser)
+        # Get user's completed books to exclude from recommendations
+        user_completed_subq = (
+            self.session.query(BookUser.work_id)
             .filter(
                 BookUser.user_id == user_id,
-                BookUser.status == "completed"
+                BookUser.status.in_(["completed", "reading"])
             )
-            .options(joinedload(Book.genres))
-            .all()
+            .subquery()
         )
-        
-        # Count genres (excluding Audiobook)
-        genre_weights = {}
-        for book in read_books:
-            for genre in book.genres:
-                if genre.name != "Audiobook":  # Skip Audiobook genre
-                    genre_weights[genre.name] = genre_weights.get(genre.name, 0) + 1
-                
-        # Get work_ids of all books the user has any status for (to exclude)
-        user_book_work_ids = set(
-            book.work_id for book in
-            self.session.query(Book)
-            .join(BookUser)
-            .filter(BookUser.user_id == user_id)
-            .all()
-        )
-        
-        # Get all unread books with their genres
-        unread_books = (
-            self.session.query(Book)
-            .filter(~Book.work_id.in_(user_book_work_ids))
-            .options(
-                joinedload(Book.genres),
-                joinedload(Book.book_authors).joinedload(BookAuthor.author),
-                joinedload(Book.book_series).joinedload(BookSeries.series)
+
+        # Calculate genre weights based on user's reading history
+        user_genre_weights = (
+            self.session.query(
+                BookGenre.genre_id,
+                func.count().label("weight")
             )
-            .all()
+            .join(BookUser, BookUser.work_id == BookGenre.work_id)
+            .join(Genre, BookGenre.genre_id == Genre.id)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed",
+                Genre.name != "Audiobook"
+            )
         )
         
-        # Calculate scores for each unread book
-        scored_books = []
-        for book in unread_books:
-            # Get scores for each genre (excluding Audiobook)
-            genre_scores = [
-                (genre.name, genre_weights.get(genre.name, 0))
-                for genre in book.genres
-                if genre.name != "Audiobook"  # Skip Audiobook genre
-            ]
-            # Only include genres with non-zero scores
-            genre_scores = [(name, score) for name, score in genre_scores if score > 0]
+        # Add date filter if days parameter is provided
+        if days is not None:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            user_genre_weights = user_genre_weights.filter(BookUser.finished_at >= cutoff_date)
             
-            if genre_scores:  # Only include books that match at least one genre
-                total_score = sum(score for _, score in genre_scores)
-                # Sort genre scores by score descending, then name
-                genre_scores.sort(key=lambda x: (-x[1], x[0]))
-                scored_books.append((book, total_score, genre_scores))
-        
-        # Sort by total score descending, then by Goodreads votes
-        scored_books.sort(key=lambda x: (-x[1], -(x[0].goodreads_votes or 0)))
-        
-        # Print debug info
-        print(f"\nFound {len(scored_books)} books with matching genres")
-        for book, total_score, genre_scores in scored_books[:5]:  # Show top 5 for debugging
-            print(f"\n{book.title}")
-            print(f"Total Score: {total_score}")
-            print("Genres:")
-            for genre, score in genre_scores:
-                print(f"  - {genre}: {score}")
-        
-        return scored_books[offset:offset + limit]
+        user_genre_weights = user_genre_weights.group_by(BookGenre.genre_id).subquery()
+
+        # Main query: unread books (i.e. not in user_completed_subq)
+        # Join with BookGenre and the user_genre_weights to calculate a total score per book.
+        query = (
+            self.session.query(
+                Book,
+                func.sum(user_genre_weights.c.weight).label("total_score")
+            )
+            .join(BookGenre, Book.work_id == BookGenre.work_id)
+            .join(user_genre_weights, BookGenre.genre_id == user_genre_weights.c.genre_id)
+            .join(Genre, BookGenre.genre_id == Genre.id)
+            .filter(
+                ~Book.work_id.in_(user_completed_subq),
+                Genre.name != "Audiobook",
+                Book.source != None,  # Only include published books
+                or_(
+                    Book.published_state == "published",
+                    Book.published_state == None
+                )
+            )
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.book_wanted)
+            )
+            .group_by(Book.work_id)
+            .having(func.sum(user_genre_weights.c.weight) > 0)
+            .order_by(desc("total_score"), desc(Book.goodreads_votes))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        results = query.all()
+
+        recommended_books = []
+        # For each recommended book, get a breakdown of genre scores
+        for book, total_score in results:
+            breakdown = (
+                self.session.query(
+                    Genre.name,
+                    user_genre_weights.c.weight
+                )
+                .join(BookGenre, Genre.id == BookGenre.genre_id)
+                .join(user_genre_weights, BookGenre.genre_id == user_genre_weights.c.genre_id)
+                .filter(BookGenre.work_id == book.work_id, Genre.name != "Audiobook")
+                .all()
+            )
+            # Sort breakdown by weight descending then alphabetically by genre name
+            genre_breakdown = sorted(breakdown, key=lambda x: (-x[1], x[0]))
+            recommended_books.append((book, total_score, genre_breakdown))
+
+        return recommended_books
 
     def get_on_deck_books(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Book]:
         """

@@ -103,13 +103,64 @@ class BookRepository:
             
         return base_query.count()
 
-    def get_books_by_author(self, author_id: str) -> List[Book]:
-        """Get all books by a specific author"""
-        return self.session.query(Book).join(
-            Book.authors
-        ).filter(
-            Author.goodreads_id == author_id
-        ).all()
+    def get_books_by_author(
+        self,
+        author_id: str,
+        user_id: Optional[int] = None,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
+        """Get books by an author, sorted by publication date.
+        
+        Args:
+            author_id: The Goodreads ID of the author
+            user_id: Optional user ID to include read status and wanted status
+            limit: Maximum number of books to return
+            offset: Number of books to skip
+            
+        Returns:
+            List of Book objects with loaded relationships
+        """
+        query = (
+            self.session.query(Book)
+            .join(BookAuthor)
+            .filter(BookAuthor.author_id == author_id)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series)
+            )
+        )
+        
+        # Add user-specific relationships if user_id provided
+        if user_id is not None:
+            query = query.options(
+                joinedload(Book.book_users),
+                joinedload(Book.book_wanted)
+            )
+            
+        # Sort by publication date (nulls last)
+        query = query.order_by(
+            Book.published_date.asc().nulls_last(),
+            Book.title.asc()
+        )
+        
+        return query.offset(offset).limit(limit).all()
+
+    def count_books_by_author(self, author_id: str) -> int:
+        """Count total books by an author.
+        
+        Args:
+            author_id: The Goodreads ID of the author
+            
+        Returns:
+            Total count of books by the author
+        """
+        return (
+            self.session.query(func.count(Book.work_id))
+            .join(BookAuthor)
+            .filter(BookAuthor.author_id == author_id)
+            .scalar() or 0
+        )
 
     def get_books_by_genre(self, genre_name: str) -> List[Book]:
         """Get all books in a specific genre"""
@@ -301,10 +352,11 @@ class BookRepository:
         self,
         user_id: int,
         work_id: str,
-        status: str,
+        status: Optional[str],
         source: Optional[str] = None,
         started_at: Optional[datetime] = None,
-        finished_at: Optional[datetime] = None
+        finished_at: Optional[datetime] = None,
+        update_none: bool = False
     ) -> Optional[BookUser]:
         """Update or create a book status for a user.
         
@@ -315,6 +367,7 @@ class BookRepository:
             source: Optional source of the book
             started_at: Optional start date
             finished_at: Optional finish date
+            update_none: If True, None values will be applied (used to explicitly set nulls)
             
         Returns:
             Updated or created BookUser object, or None if book not found
@@ -336,10 +389,14 @@ class BookRepository:
         
         if book_user:
             # Update existing status
-            book_user.status = status
-            book_user.source = source
-            book_user.started_at = started_at
-            book_user.finished_at = finished_at
+            if status is not None or update_none:
+                book_user.status = status
+            if source is not None or update_none:
+                book_user.source = source
+            if started_at is not None or update_none:
+                book_user.started_at = started_at
+            if finished_at is not None or update_none:
+                book_user.finished_at = finished_at
         else:
             # Create new status
             book_user = BookUser(
@@ -358,3 +415,24 @@ class BookRepository:
         except:
             self.session.rollback()
             raise
+
+    def delete_book_status(self, user_id: int, work_id: str) -> bool:
+        """Delete a book status for a user.
+        
+        Args:
+            user_id: The ID of the user
+            work_id: The work ID of the book
+            
+        Returns:
+            True if the status was deleted, False if not found
+        """
+        result = (
+            self.session.query(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.work_id == work_id
+            )
+            .delete()
+        )
+        self.session.commit()
+        return result > 0

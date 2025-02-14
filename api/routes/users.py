@@ -24,7 +24,7 @@ def get_users(
     db: Session = Depends(get_db)
 ):
     """
-    Get a paginated list of users with optional name search.
+    Get a paginated list of users.
     
     Args:
         query: Optional search string to filter users by name
@@ -37,25 +37,21 @@ def get_users(
     """
     repo = UserRepository(db)
     
-    # Calculate offset for pagination
-    offset = (page - 1) * size
-    
-    # Get users with pagination
+    # Get users with search filter
     users = repo.search_users(query=query, limit=size)
     
-    # Get total count for pagination
-    total = len(users)
-    
-    # Create response with just the basic user information
+    # Create response with user information
     response = {
         "items": [
             {
                 "id": user.id,
-                "name": user.name
+                "name": user.name,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at
             }
             for user in users
         ],
-        "total": total,
+        "total": len(users),
         "page": page,
         "size": size
     }
@@ -313,6 +309,7 @@ def get_user_genre_counts(
 @router.get("/{user_id}/books/recommended", response_model=BookList)
 def get_user_recommended_books(
     user_id: int,
+    days: Optional[int] = Query(None, ge=1, description="Only consider books read within this many days"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
@@ -327,6 +324,7 @@ def get_user_recommended_books(
     
     Args:
         user_id: The ID of the user
+        days: Optional. If provided, only consider books read within this many days
         page: Page number (1-based)
         size: Number of items per page
         db: Database session
@@ -347,6 +345,7 @@ def get_user_recommended_books(
     # Get recommended books with their scores
     books_with_scores = repo.get_recommended_books(
         user_id=user_id,
+        days=days,
         limit=size,
         offset=offset
     )
@@ -386,22 +385,22 @@ def get_user_recommended_books(
                         "score": genre_score
                     }
                     for genre_name, genre_score in genre_scores
-                ]
+                ],
+                "wanted": next((
+                    {
+                        "source": bw.source,
+                        "created_at": bw.created_at
+                    }
+                    for bw in book.book_wanted
+                    if bw.user_id == user_id
+                ), None)
             }
             for book, total_score, genre_scores in books_with_scores
         ],
         "total": len(books_with_scores),  # For now, just use the number of returned items
         "page": page,
         "size": size
-    }
-    
-    # Debug print the response
-    for item in response["items"]:
-        print(f"\nBook: {item['title']}")
-        print(f"Total Score: {item['similar_count']}")
-        print("Matching Genres:")
-        for genre in item['matched_genres']:
-            print(f"  - {genre['name']}: {genre['score']}")
+    } 
     
     return BookList(**response)
 
@@ -506,7 +505,7 @@ def get_user_on_deck_books(
 def add_wanted_book(
     user_id: int,
     work_id: str,
-    source: str = Query(..., description="Where the book will be acquired from"),
+    source: str = Query(..., description="Where the book will be acquired from (e.g., 'library', 'kindle', 'manual')"),
     db: Session = Depends(get_db)
 ):
     """
@@ -515,16 +514,24 @@ def add_wanted_book(
     Args:
         user_id: The ID of the user
         work_id: The work ID of the book to add
-        source: Where the book will be acquired from
+        source: Where the book will be acquired from (required, e.g., 'library', 'kindle', 'manual')
         db: Database session
     
     Returns:
         The created BookWanted entry
         
     Raises:
-        HTTPException: If the user doesn't exist, the book doesn't exist,
-                      or the book is already in the wanted list
+        HTTPException: 
+            - 404: If the user or book doesn't exist
+            - 400: If the book is already in the wanted list
+            - 422: If source parameter is missing
     """
+    if not source:
+        raise HTTPException(
+            status_code=422,
+            detail="source parameter is required. Must specify where the book will be acquired from (e.g., 'library', 'kindle', 'manual')"
+        )
+    
     repo = UserRepository(db)
     
     # Check if user exists
@@ -1106,3 +1113,29 @@ def get_user_series_books(
     }
     
     return BookList(**response)
+
+@router.get("/{user_id}", response_model=User)
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a user by their ID.
+    
+    Args:
+        user_id: The ID of the user to retrieve
+        db: Database session
+    
+    Returns:
+        User object with basic information (id, name, timestamps)
+        
+    Raises:
+        HTTPException: If the user is not found
+    """
+    repo = UserRepository(db)
+    user = repo.get_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        
+    return user
