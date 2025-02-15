@@ -173,6 +173,8 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
+from core.exclusions import get_exclusion_reason
+from core.sa.models import Book, BookAuthor, BookGenre
 
 @click.group()
 def book():
@@ -317,6 +319,72 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
         session.close()
         
     click.echo("\nFinished updating book covers")
+
+@book.command()
+@click.option('--limit', default=None, type=int, help='Limit number of books to check')
+@click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
+def check_exclusions(limit: Optional[int], verbose: bool):
+    """Check existing books against exclusion rules.
+    
+    Example:
+        cli book check-exclusions  # Check all books
+        cli book check-exclusions --limit 100  # Check first 100 books
+        cli book check-exclusions --verbose  # Show detailed progress
+    """
+    # Initialize database and session
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        # Get all books with their relationships
+        query = (
+            session.query(Book)
+            .outerjoin(BookAuthor)
+            .outerjoin(BookGenre)
+        )
+        
+        if limit:
+            query = query.limit(limit)
+            
+        books = query.all()
+        total_books = len(books)
+        excluded_books = []
+        
+        click.echo(f"\nChecking {total_books} books against exclusion rules...")
+        
+        for i, book in enumerate(books, 1):
+            # Convert SQLAlchemy model to dict format expected by exclusions
+            book_dict = {
+                "title": book.title,
+                "goodreads_id": book.goodreads_id,
+                "work_id": book.work_id,
+                "pages": book.pages,
+                "goodreads_votes": book.goodreads_votes,
+                "description": book.description,
+                "published_state": book.published_state,
+                "genres": [{"name": genre.name} for genre in book.genres]
+            }
+            
+            # Check against exclusion rules
+            reason = get_exclusion_reason(book_dict)
+            if reason:
+                excluded_books.append((book, reason))
+                if verbose:
+                    click.echo(f"[{i}/{total_books}] {book.title} - {reason}")
+            elif verbose:
+                click.echo(f"[{i}/{total_books}] {book.title} - OK")
+        
+        # Print summary
+        click.echo(f"\nFound {len(excluded_books)} books that match exclusion rules:")
+        for book, reason in excluded_books:
+            click.echo(f"- {book.title} ({book.work_id})")
+            click.echo(f"  Reason: {reason}")
+            
+    except Exception as e:
+        click.echo(f"\nError checking exclusions: {e}", err=True)
+        raise
+    finally:
+        session.close()
 
 
 

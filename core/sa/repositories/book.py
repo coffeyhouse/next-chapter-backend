@@ -50,7 +50,7 @@ class BookRepository:
         Args:
             query: Search query string
             source: Filter by source
-            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date, created_at)
             sort_order: Sort order (asc or desc)
             limit: Maximum number of results to return
             offset: Number of records to skip
@@ -71,7 +71,15 @@ class BookRepository:
             base_query = base_query.filter(Book.source == source)
         
         # Apply sorting
-        sort_column = getattr(Book, sort_field)
+        valid_sort_fields = {
+            "goodreads_votes": Book.goodreads_votes,
+            "goodreads_rating": Book.goodreads_rating,
+            "title": Book.title,
+            "published_date": Book.published_date,
+            "created_at": Book.created_at
+        }
+        
+        sort_column = valid_sort_fields.get(sort_field, Book.goodreads_votes)
         if sort_order == "desc":
             base_query = base_query.order_by(desc(sort_column))
         else:
@@ -222,7 +230,10 @@ class BookRepository:
         """Get books that don't have any similar books synced yet.
         
         Args:
-            source: Optional source filter (e.g. 'library' for library books)
+            source: Optional source filter:
+                   - 'library' for library books
+                   - 'read' for books that any user has read
+                   - any other source value will filter by that source
             
         Returns:
             List of Book objects that haven't been synced for similar books
@@ -232,7 +243,16 @@ class BookRepository:
         
         # Add source filter if specified
         if source:
-            query = query.filter(Book.source == source)
+            if source == 'read':
+                # Find books that any user has read
+                query = (
+                    query
+                    .join(BookUser)
+                    .filter(BookUser.status == 'completed')
+                    .distinct()
+                )
+            else:
+                query = query.filter(Book.source == source)
         
         # Filter for books that haven't been synced for similar books
         query = query.filter(Book.similar_synced_at.is_(None))

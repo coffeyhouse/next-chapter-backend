@@ -1138,8 +1138,8 @@ class UserRepository:
         self,
         user_id: int,
         include_deleted: bool = False,
-        limit: int = 20,
-        offset: int = 0
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
     ) -> List[tuple[UserAuthorSubscription, Author]]:
         """Get a user's author subscriptions with full author information.
         
@@ -1161,20 +1161,21 @@ class UserRepository:
         if not include_deleted:
             query = query.filter(UserAuthorSubscription.deleted_at.is_(None))
             
-        return (
-            query
-            .order_by(UserAuthorSubscription.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = query.order_by(UserAuthorSubscription.created_at.desc())
+        
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+            
+        return query.all()
         
     def get_series_subscriptions(
         self,
         user_id: int,
         include_deleted: bool = False,
-        limit: int = 20,
-        offset: int = 0
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
     ) -> List[tuple[UserSeriesSubscription, Series]]:
         """Get a user's series subscriptions with full series information.
         
@@ -1196,13 +1197,14 @@ class UserRepository:
         if not include_deleted:
             query = query.filter(UserSeriesSubscription.deleted_at.is_(None))
             
-        return (
-            query
-            .order_by(UserSeriesSubscription.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = query.order_by(UserSeriesSubscription.created_at.desc())
+        
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+            
+        return query.all()
         
     def is_subscribed_to_author(self, user_id: int, author_goodreads_id: str, include_deleted: bool = False) -> bool:
         """Check if a user is subscribed to an author.
@@ -1277,4 +1279,48 @@ class UserRepository:
             )
             .order_by(BookSeries.series_order)
             .all()
-        ) 
+        )
+
+    def get_series_books(self, series_id: str) -> List[Book]:
+        """Get the first three books in a series by release date.
+        
+        Args:
+            series_id: The Goodreads ID of the series
+            
+        Returns:
+            List of up to three Book objects, ordered by published_date
+        """
+        return (
+            self.session.query(Book)
+            .join(BookSeries)
+            .filter(BookSeries.series.has(goodreads_id=series_id))
+            .order_by(Book.published_date)
+            .all()
+        )
+
+    def get_series_author_id(self, series_id: str) -> Optional[str]:
+        """Get the Goodreads ID of the author of the first book in a series.
+        
+        Args:
+            series_id: The Goodreads ID of the series
+            
+        Returns:
+            The author's Goodreads ID if found, None otherwise
+        """
+        first_book = (
+            self.session.query(Book)
+            .join(BookSeries)
+            .join(BookAuthor)
+            .filter(
+                BookSeries.series.has(goodreads_id=series_id),
+                BookAuthor.role == "Author"
+            )
+            .order_by(Book.published_date)
+            .first()
+        )
+        
+        if first_book and first_book.book_authors:
+            for ba in first_book.book_authors:
+                if ba.role == "Author":
+                    return ba.author.goodreads_id
+        return None 

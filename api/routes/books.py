@@ -17,7 +17,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 def get_books(
     query: Optional[str] = Query(None, description="Search books by title"),
     source: Optional[str] = Query(None, description="Filter books by source"),
-    sort: str = Query("goodreads_votes", description="Sort field (goodreads_votes, goodreads_rating, title, published_date)"),
+    sort: str = Query("goodreads_votes", description="Sort field (goodreads_votes, goodreads_rating, title, published_date, created_at)"),
     order: str = Query("desc", description="Sort order (asc or desc)"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -29,17 +29,17 @@ def get_books(
     Args:
         query: Optional search string to filter books by title
         source: Optional source to filter books
-        sort: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+        sort: Field to sort by (goodreads_votes, goodreads_rating, title, published_date, created_at)
         order: Sort order (asc or desc)
         page: Page number (1-based)
-        size: Number of items per page
+        size: Number of items per page 
         db: Database session
     
     Returns:
         BookList containing paginated books with basic information
     """
     # Validate sort field
-    valid_sort_fields = ["goodreads_votes", "goodreads_rating", "title", "published_date"]
+    valid_sort_fields = ["goodreads_votes", "goodreads_rating", "title", "published_date", "created_at"]
     if sort not in valid_sort_fields:
         raise HTTPException(status_code=400, detail=f"Invalid sort field. Must be one of: {', '.join(valid_sort_fields)}")
     

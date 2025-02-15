@@ -1,7 +1,8 @@
 # api/schemas/user.py
 from datetime import datetime
 from typing import Optional, List, Union
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
+from enum import Enum
 
 class UserBase(BaseModel):
     name: str
@@ -101,6 +102,27 @@ class SeparatedSubscriptionList(BaseModel):
     series: List[SeriesSubscriptionResponse]
     total_authors: int
     total_series: int
+    page: int
+    size: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class SubscriptionTypeEnum(str, Enum):
+    author = "author"
+    series = "series"
+
+class SubscriptionResponse(SubscriptionBase):
+    type: SubscriptionTypeEnum
+    author_goodreads_id: str
+    author_name: Optional[str] = None
+    series_goodreads_id: Optional[str] = None
+    series_name: Optional[str] = None
+    user_id: int
+    series_books: Optional[List[str]] = None
+
+class UnifiedSubscriptionList(BaseModel):
+    items: List[SubscriptionResponse]
+    total: int
     page: int
     size: int
     
