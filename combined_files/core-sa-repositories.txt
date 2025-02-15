@@ -151,7 +151,7 @@ class BookRepository:
         Args:
             query: Search query string
             source: Filter by source
-            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+            sort_field: Field to sort by (goodreads_votes, goodreads_rating, title, published_date, created_at)
             sort_order: Sort order (asc or desc)
             limit: Maximum number of results to return
             offset: Number of records to skip
@@ -172,7 +172,15 @@ class BookRepository:
             base_query = base_query.filter(Book.source == source)
         
         # Apply sorting
-        sort_column = getattr(Book, sort_field)
+        valid_sort_fields = {
+            "goodreads_votes": Book.goodreads_votes,
+            "goodreads_rating": Book.goodreads_rating,
+            "title": Book.title,
+            "published_date": Book.published_date,
+            "created_at": Book.created_at
+        }
+        
+        sort_column = valid_sort_fields.get(sort_field, Book.goodreads_votes)
         if sort_order == "desc":
             base_query = base_query.order_by(desc(sort_column))
         else:
@@ -323,7 +331,10 @@ class BookRepository:
         """Get books that don't have any similar books synced yet.
         
         Args:
-            source: Optional source filter (e.g. 'library' for library books)
+            source: Optional source filter:
+                   - 'library' for library books
+                   - 'read' for books that any user has read
+                   - any other source value will filter by that source
             
         Returns:
             List of Book objects that haven't been synced for similar books
@@ -333,7 +344,16 @@ class BookRepository:
         
         # Add source filter if specified
         if source:
-            query = query.filter(Book.source == source)
+            if source == 'read':
+                # Find books that any user has read
+                query = (
+                    query
+                    .join(BookUser)
+                    .filter(BookUser.status == 'completed')
+                    .distinct()
+                )
+            else:
+                query = query.filter(Book.source == source)
         
         # Filter for books that haven't been synced for similar books
         query = query.filter(Book.similar_synced_at.is_(None))
@@ -2121,8 +2141,8 @@ class UserRepository:
         self,
         user_id: int,
         include_deleted: bool = False,
-        limit: int = 20,
-        offset: int = 0
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
     ) -> List[tuple[UserAuthorSubscription, Author]]:
         """Get a user's author subscriptions with full author information.
         
@@ -2144,20 +2164,21 @@ class UserRepository:
         if not include_deleted:
             query = query.filter(UserAuthorSubscription.deleted_at.is_(None))
             
-        return (
-            query
-            .order_by(UserAuthorSubscription.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = query.order_by(UserAuthorSubscription.created_at.desc())
+        
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+            
+        return query.all()
         
     def get_series_subscriptions(
         self,
         user_id: int,
         include_deleted: bool = False,
-        limit: int = 20,
-        offset: int = 0
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
     ) -> List[tuple[UserSeriesSubscription, Series]]:
         """Get a user's series subscriptions with full series information.
         
@@ -2179,13 +2200,14 @@ class UserRepository:
         if not include_deleted:
             query = query.filter(UserSeriesSubscription.deleted_at.is_(None))
             
-        return (
-            query
-            .order_by(UserSeriesSubscription.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = query.order_by(UserSeriesSubscription.created_at.desc())
+        
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+            
+        return query.all()
         
     def is_subscribed_to_author(self, user_id: int, author_goodreads_id: str, include_deleted: bool = False) -> bool:
         """Check if a user is subscribed to an author.
@@ -2260,7 +2282,51 @@ class UserRepository:
             )
             .order_by(BookSeries.series_order)
             .all()
-        ) 
+        )
+
+    def get_series_books(self, series_id: str) -> List[Book]:
+        """Get the first three books in a series by release date.
+        
+        Args:
+            series_id: The Goodreads ID of the series
+            
+        Returns:
+            List of up to three Book objects, ordered by published_date
+        """
+        return (
+            self.session.query(Book)
+            .join(BookSeries)
+            .filter(BookSeries.series.has(goodreads_id=series_id))
+            .order_by(Book.published_date)
+            .all()
+        )
+
+    def get_series_author_id(self, series_id: str) -> Optional[str]:
+        """Get the Goodreads ID of the author of the first book in a series.
+        
+        Args:
+            series_id: The Goodreads ID of the series
+            
+        Returns:
+            The author's Goodreads ID if found, None otherwise
+        """
+        first_book = (
+            self.session.query(Book)
+            .join(BookSeries)
+            .join(BookAuthor)
+            .filter(
+                BookSeries.series.has(goodreads_id=series_id),
+                BookAuthor.role == "Author"
+            )
+            .order_by(Book.published_date)
+            .first()
+        )
+        
+        if first_book and first_book.book_authors:
+            for ba in first_book.book_authors:
+                if ba.role == "Author":
+                    return ba.author.goodreads_id
+        return None 
 
 
 # core/sa/repositories/__init__.py

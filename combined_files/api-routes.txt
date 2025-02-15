@@ -17,7 +17,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 def get_books(
     query: Optional[str] = Query(None, description="Search books by title"),
     source: Optional[str] = Query(None, description="Filter books by source"),
-    sort: str = Query("goodreads_votes", description="Sort field (goodreads_votes, goodreads_rating, title, published_date)"),
+    sort: str = Query("goodreads_votes", description="Sort field (goodreads_votes, goodreads_rating, title, published_date, created_at)"),
     order: str = Query("desc", description="Sort order (asc or desc)"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -29,17 +29,17 @@ def get_books(
     Args:
         query: Optional search string to filter books by title
         source: Optional source to filter books
-        sort: Field to sort by (goodreads_votes, goodreads_rating, title, published_date)
+        sort: Field to sort by (goodreads_votes, goodreads_rating, title, published_date, created_at)
         order: Sort order (asc or desc)
         page: Page number (1-based)
-        size: Number of items per page
+        size: Number of items per page 
         db: Database session
     
     Returns:
         BookList containing paginated books with basic information
     """
     # Validate sort field
-    valid_sort_fields = ["goodreads_votes", "goodreads_rating", "title", "published_date"]
+    valid_sort_fields = ["goodreads_votes", "goodreads_rating", "title", "published_date", "created_at"]
     if sort not in valid_sort_fields:
         raise HTTPException(status_code=400, detail=f"Invalid sort field. Must be one of: {', '.join(valid_sort_fields)}")
     
@@ -627,17 +627,20 @@ def get_author_books(
 
 # api/routes/users.py
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc
 from datetime import datetime
 
 from core.sa.database import get_db
 from core.sa.repositories.user import UserRepository
+from core.sa.models import Book, BookSeries, BookAuthor, Author, Series, UserSeriesSubscription
 from api.schemas.user import (
     User, UserList, BookWantedCreate, BookWantedResponse,
     AuthorSubscriptionResponse, SeriesSubscriptionResponse, SubscriptionList,
-    SeparatedSubscriptionList
+    SeparatedSubscriptionList, SubscriptionResponse, UnifiedSubscriptionList,
+    SubscriptionTypeEnum
 )
 from api.schemas.book import BookList, GenreCountList
 
@@ -1294,26 +1297,24 @@ def get_wanted_books(
     
     return BookList(**response)
 
-@router.post("/{user_id}/subscriptions/authors/{author_id}", response_model=AuthorSubscriptionResponse)
-def subscribe_to_author(
+@router.post("/{user_id}/subscriptions", response_model=SubscriptionResponse)
+def create_subscription(
     user_id: int,
-    author_id: str,
+    type: SubscriptionTypeEnum = Query(..., description="Type of subscription ('author' or 'series')"),
+    goodreads_id: str = Query(..., description="Goodreads ID of the author or series to subscribe to"),
     db: Session = Depends(get_db)
 ):
     """
-    Subscribe a user to an author to receive updates about new books.
+    Create a new subscription to either an author or series.
     
     Args:
         user_id: The ID of the user
-        author_id: The Goodreads ID of the author
+        type: Type of subscription ('author' or 'series')
+        goodreads_id: Goodreads ID of the author or series
         db: Database session
     
     Returns:
-        The created subscription with author information
-        
-    Raises:
-        HTTPException: If the user doesn't exist, the author doesn't exist,
-                      or the user is already subscribed
+        SubscriptionResponse containing the created subscription details
     """
     repo = UserRepository(db)
     
@@ -1322,134 +1323,82 @@ def subscribe_to_author(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    try:
-        subscription = repo.subscribe_to_author(user_id=user_id, author_goodreads_id=author_id)
-        if not subscription:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Author with ID {author_id} not found"
-            )
-            
-        # Get author name for response
-        return {
-            "goodreads_id": subscription.author_goodreads_id,
-            "name": subscription.author.name,
-            "user_id": subscription.user_id,
-            "created_at": subscription.created_at,
-            "updated_at": subscription.updated_at,
-            "deleted_at": subscription.deleted_at
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.post("/{user_id}/subscriptions/series/{series_id}", response_model=SeriesSubscriptionResponse)
-def subscribe_to_series(
-    user_id: int,
-    series_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Subscribe a user to a series to receive updates about new books.
-    
-    Args:
-        user_id: The ID of the user
-        series_id: The Goodreads ID of the series
-        db: Database session
-    
-    Returns:
-        The created subscription with series information
-        
-    Raises:
-        HTTPException: If the user doesn't exist, the series doesn't exist,
-                      or the user is already subscribed
-    """
-    repo = UserRepository(db)
-    
-    # Check if user exists
-    user = repo.get_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    try:
-        subscription = repo.subscribe_to_series(user_id=user_id, series_goodreads_id=series_id)
-        if not subscription:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Series with ID {series_id} not found"
-            )
-            
-        # Get series title for response
-        return {
-            "goodreads_id": subscription.series_goodreads_id,
-            "title": subscription.series.title,
-            "user_id": subscription.user_id,
-            "created_at": subscription.created_at,
-            "updated_at": subscription.updated_at,
-            "deleted_at": subscription.deleted_at
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.delete("/{user_id}/subscriptions/authors/{author_id}", status_code=204)
-def unsubscribe_from_author(
-    user_id: int,
-    author_id: str,
-    hard_delete: bool = Query(False, description="Whether to permanently delete the subscription"),
-    db: Session = Depends(get_db)
-):
-    """
-    Unsubscribe a user from an author.
-    
-    Args:
-        user_id: The ID of the user
-        author_id: The Goodreads ID of the author
-        hard_delete: If True, permanently deletes the subscription; if False, soft deletes
-        db: Database session
-    
-    Returns:
-        204 No Content on success
-        
-    Raises:
-        HTTPException: If the user doesn't exist or wasn't subscribed to the author
-    """
-    repo = UserRepository(db)
-    
-    # Check if user exists
-    user = repo.get_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if not repo.unsubscribe_from_author(
-        user_id=user_id,
-        author_goodreads_id=author_id,
-        hard_delete=hard_delete
-    ):
-        raise HTTPException(
-            status_code=404,
-            detail=f"No active subscription found for author {author_id}"
+    if type == SubscriptionTypeEnum.author:
+        result = repo.subscribe_to_author(user_id=user_id, author_id=goodreads_id)
+        author = repo.session.query(Author).filter(Author.goodreads_id == goodreads_id).first()
+        if not author:
+            raise HTTPException(status_code=404, detail="Author not found")
+        return SubscriptionResponse(
+            type=SubscriptionTypeEnum.author,
+            author_goodreads_id=result.author_goodreads_id,
+            author_name=author.name,
+            user_id=result.user_id,
+            created_at=result.created_at,
+            updated_at=result.updated_at,
+            deleted_at=result.deleted_at
         )
+    elif type == SubscriptionTypeEnum.series:
+        try:
+            result = repo.subscribe_to_series(user_id=user_id, series_goodreads_id=goodreads_id)
+        except ValueError as e:
+            if "UNIQUE constraint failed" in str(e):
+                # Try to restore if it exists but is soft-deleted
+                restored = repo.restore_series_subscription(user_id=user_id, series_goodreads_id=goodreads_id)
+                if not restored:
+                    raise HTTPException(status_code=400, detail="Already subscribed to this series")
+                # Get the subscription after restoration
+                result = (
+                    repo.session.query(UserSeriesSubscription)
+                    .filter(
+                        UserSeriesSubscription.user_id == user_id,
+                        UserSeriesSubscription.series_goodreads_id == goodreads_id
+                    )
+                    .first()
+                )
+            else:
+                raise HTTPException(status_code=400, detail=str(e))
+                
+        series = repo.session.query(Series).filter(Series.goodreads_id == goodreads_id).first()
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
+        
+        # Get the author information
+        series_author_id = repo.get_series_author_id(series.goodreads_id)
+        author = None
+        if series_author_id:
+            author = repo.session.query(Author).filter(Author.goodreads_id == series_author_id).first()
+        
+        return SubscriptionResponse(
+            type=SubscriptionTypeEnum.series,
+            author_goodreads_id=series_author_id,
+            author_name=author.name if author else None,
+            series_goodreads_id=result.series_goodreads_id,
+            series_name=series.title,
+            user_id=result.user_id,
+            created_at=result.created_at,
+            updated_at=result.updated_at,
+            deleted_at=result.deleted_at
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid subscription type")
 
-@router.delete("/{user_id}/subscriptions/series/{series_id}", status_code=204)
-def unsubscribe_from_series(
+@router.delete("/{user_id}/subscriptions", status_code=204)
+def delete_subscription(
     user_id: int,
-    series_id: str,
-    hard_delete: bool = Query(False, description="Whether to permanently delete the subscription"),
+    type: SubscriptionTypeEnum = Query(..., description="Type of subscription ('author' or 'series')"),
+    goodreads_id: str = Query(..., description="Goodreads ID of the author or series to unsubscribe from"),
+    hard_delete: bool = Query(False, description="If True, permanently deletes the subscription; if False, soft deletes it"),
     db: Session = Depends(get_db)
 ):
     """
-    Unsubscribe a user from a series.
+    Delete a subscription to either an author or series.
     
     Args:
         user_id: The ID of the user
-        series_id: The Goodreads ID of the series
-        hard_delete: If True, permanently deletes the subscription; if False, soft deletes
+        type: Type of subscription ('author' or 'series')
+        goodreads_id: Goodreads ID of the author or series
+        hard_delete: If True, permanently deletes; if False, soft deletes
         db: Database session
-    
-    Returns:
-        204 No Content on success
-        
-    Raises:
-        HTTPException: If the user doesn't exist or wasn't subscribed to the series
     """
     repo = UserRepository(db)
     
@@ -1458,87 +1407,39 @@ def unsubscribe_from_series(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    if not repo.unsubscribe_from_series(
-        user_id=user_id,
-        series_goodreads_id=series_id,
-        hard_delete=hard_delete
-    ):
-        raise HTTPException(
-            status_code=404,
-            detail=f"No active subscription found for series {series_id}"
-        )
-
-@router.post("/{user_id}/subscriptions/authors/{author_id}/restore", response_model=AuthorSubscriptionResponse)
-def restore_author_subscription(
-    user_id: int,
-    author_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Restore a soft-deleted author subscription.
-    
-    Args:
-        user_id: The ID of the user
-        author_id: The Goodreads ID of the author
-        db: Database session
-    
-    Returns:
-        The restored subscription with author information
-        
-    Raises:
-        HTTPException: If the user doesn't exist or the subscription wasn't found
-    """
-    repo = UserRepository(db)
-    
-    # Check if user exists
-    user = repo.get_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if not repo.restore_author_subscription(user_id=user_id, author_goodreads_id=author_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"No soft-deleted subscription found for author {author_id}"
-        )
-        
-    # Get restored subscription for response
-    subscription, author = next(
-        (sub, auth) for sub, auth in repo.get_author_subscriptions(
+    if type == SubscriptionTypeEnum.author:
+        repo.unsubscribe_from_author(
             user_id=user_id,
-            include_deleted=True,
-            limit=1
+            author_id=goodreads_id,
+            hard_delete=hard_delete
         )
-        if sub.author_goodreads_id == author_id
-    )
-    
-    return {
-        "goodreads_id": subscription.author_goodreads_id,
-        "name": author.name,
-        "user_id": subscription.user_id,
-        "created_at": subscription.created_at,
-        "updated_at": subscription.updated_at,
-        "deleted_at": subscription.deleted_at
-    }
+    elif type == SubscriptionTypeEnum.series:
+        repo.unsubscribe_from_series(
+            user_id=user_id,
+            series_goodreads_id=goodreads_id,
+            hard_delete=hard_delete
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid subscription type")
 
-@router.post("/{user_id}/subscriptions/series/{series_id}/restore", response_model=SeriesSubscriptionResponse)
-def restore_series_subscription(
+@router.patch("/{user_id}/subscriptions/restore", response_model=SubscriptionResponse)
+def restore_subscription(
     user_id: int,
-    series_id: str,
+    type: SubscriptionTypeEnum = Query(..., description="Type of subscription ('author' or 'series')"),
+    goodreads_id: str = Query(..., description="Goodreads ID of the author or series to restore"),
     db: Session = Depends(get_db)
 ):
     """
-    Restore a soft-deleted series subscription.
+    Restore a soft-deleted subscription to either an author or series.
     
     Args:
         user_id: The ID of the user
-        series_id: The Goodreads ID of the series
+        type: Type of subscription ('author' or 'series')
+        goodreads_id: Goodreads ID of the author or series
         db: Database session
     
     Returns:
-        The restored subscription with series information
-        
-    Raises:
-        HTTPException: If the user doesn't exist or the subscription wasn't found
+        SubscriptionResponse containing the restored subscription details
     """
     repo = UserRepository(db)
     
@@ -1547,54 +1448,72 @@ def restore_series_subscription(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    if not repo.restore_series_subscription(user_id=user_id, series_goodreads_id=series_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"No soft-deleted subscription found for series {series_id}"
+    if type == SubscriptionTypeEnum.author:
+        result = repo.restore_author_subscription(user_id=user_id, author_id=goodreads_id)
+        author = repo.session.query(Author).filter(Author.goodreads_id == goodreads_id).first()
+        if not author:
+            raise HTTPException(status_code=404, detail="Author not found")
+        return SubscriptionResponse(
+            type=SubscriptionTypeEnum.author,
+            author_goodreads_id=result.author_goodreads_id,
+            author_name=author.name,
+            user_id=result.user_id,
+            created_at=result.created_at,
+            updated_at=result.updated_at,
+            deleted_at=result.deleted_at
         )
+    elif type == SubscriptionTypeEnum.series:
+        result = repo.restore_series_subscription(user_id=user_id, series_goodreads_id=goodreads_id)
+        series = repo.session.query(Series).filter(Series.goodreads_id == goodreads_id).first()
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
         
-    # Get restored subscription for response
-    subscription, series = next(
-        (sub, ser) for sub, ser in repo.get_series_subscriptions(
-            user_id=user_id,
-            include_deleted=True,
-            limit=1
+        # Get the author information
+        series_author_id = repo.get_series_author_id(series.goodreads_id)
+        author = None
+        if series_author_id:
+            author = repo.session.query(Author).filter(Author.goodreads_id == series_author_id).first()
+        
+        return SubscriptionResponse(
+            type=SubscriptionTypeEnum.series,
+            author_goodreads_id=series_author_id,
+            author_name=author.name if author else None,
+            series_goodreads_id=result.series_goodreads_id,
+            series_name=series.title,
+            user_id=result.user_id,
+            created_at=result.created_at,
+            updated_at=result.updated_at,
+            deleted_at=result.deleted_at
         )
-        if sub.series_goodreads_id == series_id
-    )
-    
-    return {
-        "goodreads_id": subscription.series_goodreads_id,
-        "title": series.title,
-        "user_id": subscription.user_id,
-        "created_at": subscription.created_at,
-        "updated_at": subscription.updated_at,
-        "deleted_at": subscription.deleted_at
-    }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid subscription type")
 
-@router.get("/{user_id}/subscriptions", response_model=SeparatedSubscriptionList)
-def get_user_subscriptions(
+@router.get("/{user_id}/subscriptions", response_model=UnifiedSubscriptionList)
+def get_subscriptions(
     user_id: int,
+    type: Optional[str] = Query(
+        None,
+        description="Filter by subscription type",
+        enum=["author", "series"]
+    ),
     include_deleted: bool = Query(False, description="Whether to include soft-deleted subscriptions"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
 ):
     """
-    Get a paginated list of a user's subscriptions to authors and series.
+    Get a list of user's subscriptions, optionally filtered by type.
     
     Args:
         user_id: The ID of the user
+        type: Optional filter for subscription type ('author' or 'series')
         include_deleted: Whether to include soft-deleted subscriptions
         page: Page number (1-based)
         size: Number of items per page
         db: Database session
     
     Returns:
-        SeparatedSubscriptionList containing separate lists for author and series subscriptions
-        
-    Raises:
-        HTTPException: If the user doesn't exist
+        UnifiedSubscriptionList containing subscriptions, optionally filtered by type
     """
     repo = UserRepository(db)
     
@@ -1603,58 +1522,98 @@ def get_user_subscriptions(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Calculate offset for pagination
-    offset = (page - 1) * size
+    # Get subscriptions based on type filter
+    all_subs = []
     
-    # Get author subscriptions
-    author_subs = repo.get_author_subscriptions(
-        user_id=user_id,
-        include_deleted=include_deleted,
-        limit=size,
-        offset=offset
+    # Get author subscriptions if no type filter or type is 'author'
+    if not type or type == "author":
+        author_subs = repo.get_author_subscriptions(
+            user_id=user_id,
+            include_deleted=include_deleted
+        )
+        for sub, author in author_subs:
+            all_subs.append(SubscriptionResponse(
+                type=SubscriptionTypeEnum.author,
+                author_goodreads_id=sub.author_goodreads_id,
+                author_name=author.name,
+                user_id=sub.user_id,
+                created_at=sub.created_at,
+                updated_at=sub.updated_at,
+                deleted_at=sub.deleted_at,
+                series_books=None  # Not applicable for author subscriptions
+            ))
+    
+    # Get series subscriptions if no type filter or type is 'series'
+    if not type or type == "series":
+        series_subs = repo.get_series_subscriptions(
+            user_id=user_id,
+            include_deleted=include_deleted
+        )
+        for sub, series in series_subs:
+            # Get first three books in the series by release date
+            series_books = repo.get_series_books(series.goodreads_id)
+            
+            # Get the author of the first book (assuming it's the series author)
+            series_author_id = repo.get_series_author_id(series.goodreads_id)
+            
+            # Get the author's name from the Author table
+            author = None
+            if series_author_id:
+                author = repo.session.query(Author).filter(Author.goodreads_id == series_author_id).first()
+            
+            all_subs.append(SubscriptionResponse(
+                type=SubscriptionTypeEnum.series,
+                author_goodreads_id=series_author_id,
+                author_name=author.name if author else None,
+                series_goodreads_id=sub.series_goodreads_id,
+                series_name=series.title,
+                user_id=sub.user_id,
+                created_at=sub.created_at,
+                updated_at=sub.updated_at,
+                deleted_at=sub.deleted_at,
+                series_books=[book.work_id for book in series_books] if series_books else None
+            ))
+    
+    # Sort by created_at descending
+    all_subs.sort(key=lambda x: x.created_at, reverse=True)
+    
+    # Apply pagination
+    start_idx = (page - 1) * size
+    end_idx = start_idx + size
+    paginated_subs = all_subs[start_idx:end_idx]
+    
+    return UnifiedSubscriptionList(
+        items=paginated_subs,
+        total=len(all_subs),
+        page=page,
+        size=size
     )
+
+@router.get("/{user_id}", response_model=User)
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a user by their ID.
     
-    # Get series subscriptions
-    series_subs = repo.get_series_subscriptions(
-        user_id=user_id,
-        include_deleted=include_deleted,
-        limit=size,
-        offset=offset
-    )
+    Args:
+        user_id: The ID of the user to retrieve
+        db: Database session
     
-    # Convert to response format
-    author_items = [
-        {
-            "goodreads_id": sub.author_goodreads_id,
-            "name": author.name,
-            "user_id": sub.user_id,
-            "created_at": sub.created_at,
-            "updated_at": sub.updated_at,
-            "deleted_at": sub.deleted_at
-        }
-        for sub, author in author_subs
-    ]
+    Returns:
+        User object with basic information (id, name, timestamps)
+        
+    Raises:
+        HTTPException: If the user is not found
+    """
+    repo = UserRepository(db)
+    user = repo.get_by_id(user_id)
     
-    series_items = [
-        {
-            "goodreads_id": sub.series_goodreads_id,
-            "title": series.title,
-            "user_id": sub.user_id,
-            "created_at": sub.created_at,
-            "updated_at": sub.updated_at,
-            "deleted_at": sub.deleted_at
-        }
-        for sub, series in series_subs
-    ]
-    
-    return {
-        "authors": author_items,
-        "series": series_items,
-        "total_authors": len(author_items),
-        "total_series": len(series_items),
-        "page": page,
-        "size": size
-    }
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        
+    return user
 
 @router.get("/{user_id}/series/{series_id}/books", response_model=BookList)
 def get_user_series_books(
@@ -1664,7 +1623,6 @@ def get_user_series_books(
 ):
     """
     Get all books in a series with their read status for a user.
-    Books are ordered by their position in the series.
     
     Args:
         user_id: The ID of the user
@@ -1673,9 +1631,6 @@ def get_user_series_books(
     
     Returns:
         BookList containing all books in the series with user's read status
-        
-    Raises:
-        HTTPException: If the user doesn't exist or the series doesn't exist
     """
     repo = UserRepository(db)
     
@@ -1684,14 +1639,11 @@ def get_user_series_books(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Get all books in the series with user status
+    # Get series books with user status
     books = repo.get_series_books_with_user_status(
         user_id=user_id,
         series_goodreads_id=series_id
     )
-    
-    if not books:
-        raise HTTPException(status_code=404, detail="Series not found or has no books")
     
     # Create response with book information
     response = {
@@ -1724,7 +1676,6 @@ def get_user_series_books(
                 "user_status": next((
                     {
                         "status": bu.status,
-                        "started_at": bu.started_at,
                         "finished_at": bu.finished_at,
                         "source": bu.source
                     }
@@ -1735,35 +1686,54 @@ def get_user_series_books(
             for book in books
         ],
         "total": len(books),
-        "page": 1,  # No pagination needed as we want all books in the series
+        "page": 1,  # Not paginated since we want all books in order
         "size": len(books)
     }
     
     return BookList(**response)
 
-@router.get("/{user_id}", response_model=User)
-def get_user(
-    user_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Get a user by their ID.
+def get_series_books(self, series_id: str) -> List[Book]:
+    """Get the first three books in a series by release date.
     
     Args:
-        user_id: The ID of the user to retrieve
-        db: Database session
-    
+        series_id: The Goodreads ID of the series
+        
     Returns:
-        User object with basic information (id, name, timestamps)
-        
-    Raises:
-        HTTPException: If the user is not found
+        List of up to three Book objects, ordered by published_date
     """
-    repo = UserRepository(db)
-    user = repo.get_by_id(user_id)
+    return (
+        self.session.query(Book)
+        .join(BookSeries)
+        .filter(BookSeries.series.has(goodreads_id=series_id))
+        .order_by(Book.published_date)
+        .limit(3)
+        .all()
+    )
+
+def get_series_author_id(self, series_id: str) -> Optional[str]:
+    """Get the Goodreads ID of the author of the first book in a series.
     
-    if not user:
-        raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+    Args:
+        series_id: The Goodreads ID of the series
         
-    return user
+    Returns:
+        The author's Goodreads ID if found, None otherwise
+    """
+    first_book = (
+        self.session.query(Book)
+        .join(BookSeries)
+        .join(BookAuthor)
+        .filter(
+            BookSeries.series.has(goodreads_id=series_id),
+            BookAuthor.role == "Author"
+        )
+        .order_by(Book.published_date)
+        .first()
+    )
+    
+    if first_book and first_book.book_authors:
+        for ba in first_book.book_authors:
+            if ba.role == "Author":
+                return ba.author.goodreads_id
+    return None
 

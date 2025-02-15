@@ -527,8 +527,8 @@ class BookScraper:
                 if id_match:
                     goodreads_id = id_match.group(1)
             
-            # Skip if we've seen this ID before
-            if goodreads_id and goodreads_id in seen_ids:
+            # Skip if we don't have a goodreads_id or if we've seen this ID before
+            if not goodreads_id or goodreads_id in seen_ids:
                 continue
                 
             author = {
@@ -546,8 +546,7 @@ class BookScraper:
                 author['role'] = role
             
             authors.append(author)
-            if goodreads_id:
-                seen_ids.add(goodreads_id)
+            seen_ids.add(goodreads_id)
                 
         return authors
     
