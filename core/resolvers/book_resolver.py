@@ -26,6 +26,13 @@ class BookResolver:
             print(f"Failed to scrape the main book page for ID: {goodreads_id}")
             return None
 
+        # Check if main book meets criteria before scraping editions
+        if (main_book_data.get('pages') and
+            main_book_data.get('published_date') and
+            main_book_data.get('language') == 'English' and
+            main_book_data.get('format') in ['Kindle Edition', 'Paperback', 'Hardcover', 'Mass Market Paperback', 'ebook']):
+            return main_book_data
+
         # Step 2: Use the work id from the main book data to scrape the editions page.
         work_id = main_book_data.get('work_id')
         if not work_id:
