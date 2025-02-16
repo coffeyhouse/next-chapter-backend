@@ -208,10 +208,10 @@ def check_exclusions(limit: Optional[int], verbose: bool):
                 click.echo(f"[{i}/{total_books}] {book.title} - OK")
         
         # Print summary
-        click.echo(f"\nFound {len(excluded_books)} books that match exclusion rules:")
         for book, reason in excluded_books:
             click.echo(f"- {book.title} ({book.work_id})")
             click.echo(f"  Reason: {reason}")
+        click.echo(f"\nFound {len(excluded_books)} books that match exclusion rules:")
             
     except Exception as e:
         click.echo(f"\nError checking exclusions: {e}", err=True)
