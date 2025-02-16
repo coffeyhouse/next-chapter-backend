@@ -6,4 +6,6 @@ Requires-Dist: SQLAlchemy
 Requires-Dist: beautifulsoup4
 Requires-Dist: requests
 Requires-Dist: Pillow
+Requires-Dist: psutil
+Requires-Dist: wmi; platform_system == "Windows"
 Dynamic: requires-dist

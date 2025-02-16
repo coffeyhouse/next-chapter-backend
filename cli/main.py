@@ -9,6 +9,8 @@ from .commands.similar import similar
 from .commands.genre import genre
 from .commands.chain import chain
 from .commands.book import book
+from .commands.list import list
+from .commands.monitor import monitor
 
 @click.group()
 def cli():
@@ -24,6 +26,8 @@ cli.add_command(similar)
 cli.add_command(genre)
 cli.add_command(chain)
 cli.add_command(book)
+cli.add_command(list)
+cli.add_command(monitor)
 
 def main():
     """Entry point for the CLI"""

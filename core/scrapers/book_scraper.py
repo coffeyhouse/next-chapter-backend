@@ -72,21 +72,22 @@ class BookScraper:
         try:
             soup = BeautifulSoup(html, 'html.parser')
             book_data = {
-            'goodreads_id': book_id,
-            'title': self._extract_title(soup),
-            'work_id': self._extract_work_id(soup),
-            'description': self._extract_description(soup),
-            'language': None,
-            'pages': None,
-            'isbn': None,
-            'goodreads_rating': None,
-            'goodreads_votes': None,
-            'published_date': None,
-            'published_state': None,
-            'image_url': None,
-            'source': 'scrape',
-            'hidden': False
-        }
+                'goodreads_id': book_id,
+                'title': self._extract_title(soup),
+                'work_id': self._extract_work_id(soup),
+                'description': self._extract_description(soup),
+                'language': None,
+                'pages': None,
+                'isbn': None,
+                'goodreads_rating': None,
+                'goodreads_votes': None,
+                'published_date': None,
+                'published_state': None,
+                'image_url': None,
+                'source': 'scrape',
+                'hidden': False,
+                'format': None
+            }
             
             # Extract book details
             details = self._extract_book_details(soup)
@@ -95,7 +96,8 @@ class BookScraper:
                 'pages': details.get('pages'),
                 'isbn': details.get('isbn'),
                 'goodreads_rating': details.get('rating'),
-                'goodreads_votes': details.get('rating_count')
+                'goodreads_votes': details.get('rating_count'),
+                'format': details.get('format')
             })
             
             # Get publication date

@@ -3,3 +3,7 @@ SQLAlchemy
 beautifulsoup4
 requests
 Pillow
+psutil
+
+[:platform_system == "Windows"]
+wmi

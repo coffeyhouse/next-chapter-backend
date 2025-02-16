@@ -11,6 +11,8 @@ setup(
         "beautifulsoup4",
         "requests",
         "Pillow",
+        "psutil",
+        "wmi; platform_system=='Windows'",  # Only install wmi on Windows
     ],
     entry_points={
         "console_scripts": [

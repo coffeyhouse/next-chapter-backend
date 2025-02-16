@@ -27,11 +27,22 @@ class BookResolver:
             return None
 
         # Check if main book meets criteria before scraping editions
-        if (main_book_data.get('pages') and
-            main_book_data.get('published_date') and
-            main_book_data.get('language') == 'English' and
-            main_book_data.get('format') in ['Kindle Edition', 'Paperback', 'Hardcover', 'Mass Market Paperback', 'ebook']):
+        valid_formats = ['Kindle Edition', 'Paperback', 'Hardcover', 'Mass Market Paperback', 'ebook']
+        
+        missing_criteria = []
+        if not main_book_data.get('pages'):
+            missing_criteria.append('no page count')
+        if not main_book_data.get('published_date'):
+            missing_criteria.append('no publication date')
+        if main_book_data.get('language') != 'English':
+            missing_criteria.append(f"language is {main_book_data.get('language', 'unknown')}")
+        if main_book_data.get('format') not in valid_formats:
+            missing_criteria.append(f"format is {main_book_data.get('format', 'unknown')}")
+        
+        if not missing_criteria:
             return main_book_data
+        else:
+            print(f"Book {goodreads_id} ({main_book_data.get('title', 'Unknown Title')}) doesn't meet criteria: {', '.join(missing_criteria)}")
 
         # Step 2: Use the work id from the main book data to scrape the editions page.
         work_id = main_book_data.get('work_id')
