@@ -95,7 +95,7 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
                 click.echo(f"[{i}/{len(books)}] Processing: {book.title}")
                 
                 # Get fresh book data to ensure we have the latest cover URL
-                book_data = scraper.scrape_book(book.goodreads_id)
+                book_data = scraper.scrape(book.goodreads_id)
                 if not book_data:
                     continue
                 

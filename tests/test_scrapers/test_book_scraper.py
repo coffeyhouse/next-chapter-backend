@@ -152,10 +152,10 @@ def test_extract_cover_url(scraper, sample_book_soup):
     ])
     assert '.jpg' in cover_url or '.jpeg' in cover_url
 
-def test_scrape_book_full_integration(mock_click_context):
+def test_scrape_full_integration(mock_click_context):
     """Test full book scraping integration with live data."""
     scraper = BookScraper(scrape=True)
-    book_data = scraper.scrape_book("13496")
+    book_data = scraper.scrape("13496")
     
     # Basic structure checks
     assert isinstance(book_data, dict)
@@ -184,17 +184,17 @@ def test_scrape_book_full_integration(mock_click_context):
     assert len(book_data['series']) > 0
     assert len(book_data['genres']) > 0
 
-def test_scrape_book_error_handling(mock_click_context):
+def test_scrape_error_handling(mock_click_context):
     """Test error handling for invalid or missing data."""
     scraper = BookScraper(scrape=True)
     
     # Test with invalid book ID
-    result = scraper.scrape_book("invalid_id")
+    result = scraper.scrape("invalid_id")
     assert result is None
     
     # Test with non-existent book ID
     # Note: Goodreads returns a 200 response with empty data for non-existent IDs
-    result = scraper.scrape_book("999999999999")
+    result = scraper.scrape("999999999999")
     if result is not None:
         # If we get a result, ensure it has minimal valid data
         assert result['goodreads_id'] == "999999999999"
@@ -342,16 +342,16 @@ def test_publication_date_formats(scraper):
     assert info['state'] == "published"
     assert info['date'] == "Spring 2023"  # Should keep raw string
 
-def test_scrape_book_with_download_error(mock_click_context):
+def test_scrape_with_download_error(mock_click_context):
     """Test book scraping when download fails."""
     scraper = BookScraper(scrape=True)
     
     # Mock the downloader to simulate failure
     with patch.object(scraper.downloader, 'download_url', return_value=False):
-        result = scraper.scrape_book("12345")
+        result = scraper.scrape("12345")
         assert result is None
 
-def test_scrape_book_with_parse_error(mock_click_context, tmp_path):
+def test_scrape_with_parse_error(mock_click_context, tmp_path):
     """Test book scraping when parsing fails."""
     scraper = BookScraper(scrape=True)
     
@@ -382,7 +382,7 @@ def test_scrape_book_with_parse_error(mock_click_context, tmp_path):
     with patch.object(scraper.downloader, 'download_url', return_value=True), \
          patch('core.scrapers.book_scraper.Path', return_value=test_file), \
          patch('json.loads', side_effect=json.JSONDecodeError("Invalid JSON", "", 0)):
-        result = scraper.scrape_book("12345")
+        result = scraper.scrape("12345")
         assert result is None
 
 def test_scraper_implementations_parity(mock_click_context):
@@ -402,7 +402,7 @@ def test_scraper_implementations_parity(mock_click_context):
         print(f"\nTesting book ID: {book_id}")
         
         # Scrape the same book with both scrapers
-        original_result = original_scraper.scrape_book(book_id)
+        original_result = original_scraper.scrape(book_id)
         v2_result = v2_scraper.scrape(book_id)
         
         # Track failures for this book

@@ -28,7 +28,7 @@ def book(book_id: str, scrape: bool):
     click.echo(f"\nTesting book scraper with ID: {book_id} (scrape={scrape})")
     
     scraper = BookScraper(scrape=scrape)  # Pass the scrape flag
-    result = scraper.scrape_book(book_id)
+    result = scraper.scrape(book_id)
     
     if result:
         click.echo(click.style("\nBook Data:", fg='green'))

@@ -74,7 +74,8 @@ class AuthorRepository:
                     .filter(
                         Book.goodreads_votes.isnot(None),
                         Book.published_date >= '2000-01-01',  # Only books published after 2000
-                        Book.published_date.isnot(None)  # Ensure we have a publication date
+                        Book.published_date.isnot(None),  # Ensure we have a publication date
+                        BookAuthor.role == 'Author'  # Only consider primary authors
                     )
                     .group_by(Author.goodreads_id)
                     .having(func.max(Book.goodreads_votes) >= 10000)  # Minimum vote threshold

@@ -50,7 +50,7 @@ def sample_scraped_data():
 
 def test_create_book_from_goodreads_new_book(book_creator, mock_book_scraper, sample_scraped_data, db_session):
     # Setup
-    mock_book_scraper.scrape_book.return_value = sample_scraped_data
+    mock_book_scraper.scrape.return_value = sample_scraped_data
     
     # Execute
     book = book_creator.create_book_from_goodreads('12345')
@@ -99,7 +99,7 @@ def test_create_book_from_goodreads_existing_book(book_creator, mock_book_scrape
     db_session.commit()
     
     # Setup mock
-    mock_book_scraper.scrape_book.return_value = sample_scraped_data
+    mock_book_scraper.scrape.return_value = sample_scraped_data
     
     # Execute
     result = book_creator.create_book_from_goodreads('12345')
@@ -111,7 +111,7 @@ def test_create_book_from_goodreads_existing_book(book_creator, mock_book_scrape
 
 def test_create_book_from_goodreads_scrape_failure(book_creator, mock_book_scraper):
     # Setup mock to simulate scraping failure
-    mock_book_scraper.scrape_book.return_value = None
+    mock_book_scraper.scrape.return_value = None
     
     # Execute
     result = book_creator.create_book_from_goodreads('12345')
@@ -138,7 +138,7 @@ def test_create_book_with_existing_relationships(book_creator, mock_book_scraper
     db_session.commit()
     
     # Setup mock
-    mock_book_scraper.scrape_book.return_value = sample_scraped_data
+    mock_book_scraper.scrape.return_value = sample_scraped_data
     
     # Execute
     book = book_creator.create_book_from_goodreads('12345')

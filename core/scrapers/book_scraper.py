@@ -14,7 +14,7 @@ class BookScraper:
     def __init__(self, scrape: bool = False):
         self.downloader = GoodreadsDownloader(scrape)
         
-    def scrape_book(self, book_id: str) -> dict:
+    def scrape(self, book_id: str) -> dict:
         """
         Get book data from Goodreads book page
         Expected output:

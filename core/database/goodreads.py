@@ -658,7 +658,7 @@ class GoodreadsDB(BaseDB):
                             continue
                             
                         # Get full book details to ensure we have proper author roles
-                        book_details = self.book_scraper.scrape_book(book['goodreads_id'])
+                        book_details = self.book_scraper.scrape(book['goodreads_id'])
                         if not book_details:
                             logger.error(f"Failed to get full details for book: {book['title']}")
                             continue

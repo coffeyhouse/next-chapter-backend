@@ -21,7 +21,7 @@ class BookResolver:
             A dictionary with the final, fully scraped book details, or None if no editions found.
         """
         # Step 1: Scrape the main book page.
-        main_book_data = self.book_scraper.scrape_book(goodreads_id)
+        main_book_data = self.book_scraper.scrape(goodreads_id)
         if not main_book_data:
             print(f"Failed to scrape the main book page for ID: {goodreads_id}")
             return None
@@ -45,7 +45,7 @@ class BookResolver:
             return None
 
         # Step 4: Fully scrape the chosen edition page.
-        final_book_data = self.book_scraper.scrape_book(chosen_goodreads_id)
+        final_book_data = self.book_scraper.scrape(chosen_goodreads_id)
         if not final_book_data:
             print("Failed to fully scrape chosen edition")
             return None
