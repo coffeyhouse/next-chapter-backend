@@ -282,3 +282,189 @@ class BaseScraper(ABC):
         except Exception as e:
             self.logger.error(f"Error extracting data for {identifier}: {e}")
             return None
+
+    def scrape_paginated(self, identifier: str, max_pages: int = None) -> Optional[dict]:
+        """
+        Scrape data from paginated content.
+        
+        Args:
+            identifier: The identifier of the item to scrape
+            max_pages: Maximum number of pages to scrape (None for all pages)
+            
+        Returns:
+            Dictionary containing the combined data from all pages, or None if scraping failed
+        """
+        all_items = []
+        current_page = 1
+        metadata = {}  # Store any additional data from first page
+        
+        while True:
+            # Check page limit
+            if max_pages and current_page > max_pages:
+                break
+                
+            # Get URL for current page
+            url = self.get_page_url(identifier, current_page)
+            cache_path = self.get_cache_path(
+                f"{identifier}_page_{current_page}", 
+                suffix=f"_{urlencode(self.get_pagination_params(current_page))}.html"
+            )
+            
+            # Use cache if fresh, otherwise download
+            if not self.is_cache_fresh(cache_path):
+                if not self.download_url(url, identifier):
+                    if all_items:  # Return what we have if not first page
+                        break
+                    self.logger.error(f"Failed to download page {current_page}")
+                    return None
+            
+            # Read and parse page
+            html = self.read_cache(cache_path)
+            if not html:
+                if all_items:
+                    break
+                return None
+                
+            html = self.clean_html(html)
+            soup = self.parse_html(html)
+            if not soup:
+                if all_items:
+                    break
+                return None
+            
+            try:
+                # Extract items from current page
+                page_data = self.extract_page_data(soup, identifier)
+                if not page_data:
+                    break
+                    
+                # Store metadata from first page
+                if current_page == 1:
+                    metadata = self.extract_metadata(soup, identifier)
+                
+                # Add items from this page
+                all_items.extend(page_data)
+                
+                # Check pagination
+                pagination = self.extract_pagination(soup)
+                if not pagination or current_page >= pagination.get('total_pages', current_page):
+                    break
+                    
+                current_page += 1
+                
+            except Exception as e:
+                self.logger.error(f"Error processing page {current_page}: {e}")
+                if all_items:
+                    break
+                return None
+        
+        # Combine items with metadata
+        return {
+            'items': all_items,
+            **metadata
+        }
+
+    @abstractmethod
+    def get_page_url(self, identifier: str, page: int) -> str:
+        """
+        Get URL for a specific page.
+        Must be implemented by derived classes.
+        
+        Args:
+            identifier: The identifier being scraped
+            page: The page number
+            
+        Returns:
+            The URL for the specified page
+        """
+        pass
+
+    def get_pagination_params(self, page: int) -> dict:
+        """
+        Get pagination parameters for URL.
+        Can be overridden by derived classes.
+        
+        Args:
+            page: The page number
+            
+        Returns:
+            Dictionary of pagination parameters
+        """
+        return {
+            'page': page
+        }
+
+    @abstractmethod
+    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> list:
+        """
+        Extract items from a single page.
+        Must be implemented by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            identifier: The identifier being scraped
+            
+        Returns:
+            List of items from the page
+        """
+        pass
+
+    def extract_metadata(self, soup: BeautifulSoup, identifier: str) -> dict:
+        """
+        Extract metadata from first page.
+        Can be overridden by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            identifier: The identifier being scraped
+            
+        Returns:
+            Dictionary of metadata
+        """
+        return {}
+
+    def extract_pagination(self, soup: BeautifulSoup) -> Optional[dict]:
+        """
+        Extract pagination information.
+        Can be overridden by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            
+        Returns:
+            Dictionary with pagination info (e.g., {'current_page': 1, 'total_pages': 10})
+        """
+        # Default implementation looks for common pagination patterns
+        try:
+            pagination = {'current_page': 1, 'total_pages': 1}
+            
+            # Find pagination container
+            paginator = soup.find('div', class_=['pagination', 'paginator'])
+            if not paginator:
+                paginator = soup.find('div', style='float: right')  # Goodreads style
+            
+            if paginator:
+                # Get current page
+                current = paginator.find(['em', 'span'], class_='current')
+                if current:
+                    try:
+                        pagination['current_page'] = int(current.text.strip())
+                    except ValueError:
+                        pass
+                
+                # Get max page from links
+                max_page = 1
+                for link in paginator.find_all('a'):
+                    try:
+                        page_num = int(link.text.strip())
+                        max_page = max(max_page, page_num)
+                    except ValueError:
+                        continue
+                
+                pagination['total_pages'] = max_page
+            
+            return pagination
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting pagination: {e}")
+            return None

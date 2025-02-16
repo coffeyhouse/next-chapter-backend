@@ -1,16 +1,41 @@
 from bs4 import BeautifulSoup
 from pathlib import Path
 import re
-from ..utils.http import GoodreadsDownloader
+from .base_scraper import BaseScraper
 
-class ListScraper:
+class ListScraper(BaseScraper):
     """Scrapes books from a Goodreads list page"""
     
     def __init__(self, scrape: bool = False):
-        self.downloader = GoodreadsDownloader(scrape)
-        # Ensure cache directory exists
-        cache_dir = Path('data/cache/list/show')
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        super().__init__(scrape, cache_dir='data/cache/list/show')
+    
+    def get_url(self, identifier: str) -> str:
+        """Get URL for list page (required by BaseScraper)"""
+        return self.get_page_url(identifier, 1)
+    
+    def get_cache_path(self, identifier: str, subdir: str = '', suffix: str = '.html') -> Path:
+        """Override cache path to handle first page differently"""
+        path = self.cache_dir
+        if subdir:
+            path = path / subdir
+            
+        # First page doesn't have page parameter in URL
+        if identifier.endswith('_page_1'):
+            base_id = identifier.replace('_page_1', '')
+            return path / f"{base_id}.html"
+            
+        # For other pages, include the page parameter
+        if '_page_' in identifier:
+            base_id, page = identifier.split('_page_')
+            return self.cache_dir / f"{base_id}page={page}.html"
+            
+        return path / f"{identifier}{suffix}"
+    
+    def extract_data(self, soup: BeautifulSoup, identifier: str) -> dict:
+        """Extract data from a single page (required by BaseScraper)"""
+        return {
+            'items': self.extract_page_data(soup, identifier)
+        }
     
     def scrape_list(self, list_id: str, max_pages: int = 1) -> list[dict]:
         """
@@ -35,69 +60,98 @@ class ListScraper:
             }
         ]
         """
-        print(f"Scraping list: {list_id}")
-        all_books = []
-        current_page = 1
+        self.logger.info(f"Scraping list: {list_id}")
         
-        while current_page <= max_pages:
-            # Get list page
-            url = self._get_page_url(list_id, current_page)
-            if not self.downloader.download_url(url):
-                print(f"Failed to download list page {current_page} for ID: {list_id}")
-                break
+        # Use base class pagination
+        result = self.scrape_paginated(list_id, max_pages)
+        if not result:
+            self.logger.warning(f"No results found for list: {list_id}")
+            return []
             
-            # Read HTML
-            html = self._read_html(list_id, current_page)
-            if not html:
-                break
+        if not result.get('items'):
+            self.logger.warning(f"No books found in list: {list_id}")
+            return []
             
-            try:
-                soup = BeautifulSoup(html, 'html.parser')
-                books = self._extract_books(soup)
-                if not books:
-                    break  # No more books found
-                    
-                all_books.extend(books)
-                
-                # Check if there are more pages
-                if not self._has_next_page(soup):
-                    break
-                    
-                current_page += 1
-                
-            except Exception as e:
-                print(f"Error processing page {current_page}: {e}")
-                break
-                
-        return all_books
+        self.logger.info(f"Found {len(result['items'])} books in list")
+        return result['items']
     
-    def _get_page_url(self, list_id: str, page: int = 1) -> str:
+    def get_page_url(self, list_id: str, page: int) -> str:
         """Get URL for list page"""
         base_url = f"https://www.goodreads.com/list/show/{list_id}"
         if page > 1:
             return f"{base_url}?page={page}"
         return base_url
     
-    def _read_html(self, list_id: str, page: int = 1) -> str:
-        """Read downloaded HTML file"""
-        filename = f"{list_id}.html" if page == 1 else f"{list_id}_page_{page}.html"
-        path = Path('data/cache/list/show') / filename
+    def get_pagination_params(self, page: int) -> dict:
+        """Get pagination parameters for URL"""
+        # Only include page parameter for pages after first
+        if page > 1:
+            return {'page': page}
+        return {}
+    
+    def download_url(self, url: str, identifier: str, retries: int = 3) -> bool:
+        """Override download to handle rate limiting and retries"""
+        self.logger.info(f"Downloading: {url}")
+        success = self.downloader.download_url(url)
+        if not success:
+            self.logger.error(f"Failed to download: {url}")
+            return False
+        
+        # Get the expected cache path
+        final_path = self.get_cache_path(identifier)
+        
+        # Small delay to ensure file is closed
+        import time
+        time.sleep(0.1)
+        
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
+            # Read from the downloader's cache location
+            # For paginated requests, handle both formats
+            if '_page_' in identifier:
+                base_id, page = identifier.split('_page_')
+                temp_path = Path('data/cache/list/show') / f"{base_id}page={page}.html"
+            else:
+                temp_path = Path('data/cache/list/show') / f"{identifier}.html"
+            
+            if temp_path.exists():
+                # Create parent directories if they don't exist
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Read and write in one go to avoid file locking issues
+                with open(temp_path, 'r', encoding='utf-8') as src:
+                    content = src.read()
+                    
+                # Write to the correct final path
+                with open(final_path, 'w', encoding='utf-8') as dst:
+                    dst.write(content)
+                    
+                # Also write to base path for first page to maintain compatibility
+                if not '_page_' in identifier:
+                    base_path = Path('data/cache/list/show') / f"{identifier}.html"
+                    if base_path != final_path:
+                        with open(base_path, 'w', encoding='utf-8') as base:
+                            base.write(content)
+                
+                self.logger.info(f"Saved cache file to: {final_path}")
+                return True
+                
+            self.logger.error(f"Downloaded file not found: {temp_path}")
+            return False
+            
         except Exception as e:
-            print(f"Error reading HTML file: {e}")
-            return None
+            self.logger.error(f"Failed to save cache file: {e}")
+            return False
     
-    def _has_next_page(self, soup) -> bool:
-        """Check if there is a next page"""
-        next_link = soup.find('a', class_='next_page')
-        return next_link is not None and not 'disabled' in next_link.get('class', [])
-    
-    def _extract_books(self, soup) -> list:
+    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> list:
         """Extract books from list page"""
         books = []
         book_rows = soup.find_all('tr', itemtype="http://schema.org/Book")
+        
+        if not book_rows:
+            self.logger.warning(f"No book rows found on page: {identifier}")
+            return []
+            
+        self.logger.info(f"Found {len(book_rows)} book rows on page")
         
         for row in book_rows:
             book = {
