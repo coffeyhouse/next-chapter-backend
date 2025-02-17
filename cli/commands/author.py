@@ -5,9 +5,9 @@ from core.resolvers.book_creator import BookCreator
 from core.scrapers.author_scraper import AuthorScraper
 from core.scrapers.author_books_scraper import AuthorBooksScraper
 from core.sa.repositories.author import AuthorRepository
-from core.sa.models import Author, Book, BookAuthor
-from datetime import datetime, UTC
+from core.sa.models import Author
 from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+from core.utils.book_sync_helper import process_book_ids
 
 @click.group()
 def author():
@@ -103,19 +103,11 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
                                          "Failed to scrape author's books", 'red')
                         continue
 
-                    # Process each book
-                    for book_data in books_data['books']:
-                        try:
-                            # Create the book since author is primary
-                            book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='author')
-                            if book:
-                                tracker.increment_imported()
-                            else:
-                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                                "Book already exists or was previously scraped")
-                        except Exception as e:
-                            tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                            f"Error: {str(e)}", 'red')
+                    # Collect Goodreads IDs from the scraped books and process them at once.
+                    goodreads_ids = [b['goodreads_id'] for b in books_data['books']]
+                    created_books = process_book_ids(session, goodreads_ids, source='author', scrape=scrape)
+                    for _ in created_books:
+                        tracker.increment_imported()
 
                     # Update author last_synced_at
                     update_last_synced(author, session)

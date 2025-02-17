@@ -1,13 +1,11 @@
 import click
 from sqlalchemy.orm import Session
 from core.sa.database import Database
-from core.resolvers.book_creator import BookCreator
 from core.scrapers.series_scraper import SeriesScraper
 from core.sa.repositories.series import SeriesRepository
 from core.sa.models import Series
-from core.exclusions import should_exclude_book, get_exclusion_reason
-from datetime import datetime
 from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+from core.utils.book_sync_helper import process_book_ids
 
 @click.group()
 def series():
@@ -43,7 +41,6 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
     try:
         # Create repositories and services
         series_repo = SeriesRepository(session)
-        creator = BookCreator(session, scrape=scrape)
         series_scraper = SeriesScraper(scrape=scrape)
         
         # Initialize progress tracker
@@ -86,19 +83,11 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
                                          "Failed to scrape series data", 'red')
                         continue
                     
-                    # Process each book in the series
-                    for book_data in series_data['books']:
-                        try:
-                            # Create the book
-                            book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='series')
-                            if book:
-                                tracker.increment_imported()
-                            else:
-                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                                "Book already exists or was previously scraped")
-                        except Exception as e:
-                            tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                            f"Error: {str(e)}", 'red')
+                    # Collect all Goodreads IDs from the series books
+                    goodreads_ids = [b['goodreads_id'] for b in series_data['books']]
+                    created_books = process_book_ids(session, goodreads_ids, source='series', scrape=scrape)
+                    for _ in created_books:
+                        tracker.increment_imported()
 
                     # Update series last_synced_at
                     update_last_synced(series, session)

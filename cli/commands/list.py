@@ -2,9 +2,9 @@
 import click
 from sqlalchemy.orm import Session
 from core.sa.database import Database
-from core.resolvers.book_creator import BookCreator
 from core.scrapers.list_scraper import ListScraper
-from ..utils import ProgressTracker, print_sync_start, create_progress_bar
+from ..utils import ProgressTracker, print_sync_start
+from core.utils.book_sync_helper import process_book_ids
 
 @click.group()
 def list():
@@ -37,7 +37,6 @@ def sync_sa(source: str, limit: int, max_pages: int, scrape: bool, verbose: bool
     
     try:
         # Create services
-        creator = BookCreator(session, scrape=scrape)
         list_scraper = ListScraper(scrape=scrape)
         
         # Initialize progress tracker
@@ -55,28 +54,11 @@ def sync_sa(source: str, limit: int, max_pages: int, scrape: bool, verbose: bool
         if verbose:
             click.echo(click.style(f"\nFound {len(list_books)} books to sync", fg='blue'))
         
-        # Process each book
-        with create_progress_bar(list_books, verbose, 'Processing books', 
-                               lambda b: b['title']) as book_iter:
-            for book_data in book_iter:
-                try:
-                    # First get the full book data using resolver
-                    book_details = creator.resolver.resolve_book(book_data['goodreads_id'])
-                    if not book_details:
-                        tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                        "Failed to get book details", 'red')
-                        continue
-
-                    # Create the book using the resolved details
-                    book = creator.create_book_from_goodreads(book_details['goodreads_id'], source=f'list_{source}')
-                    if book:
-                        tracker.increment_imported()
-                    else:
-                        tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                        "Book already exists or was previously scraped")
-                except Exception as e:
-                    tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                    f"Error: {str(e)}", 'red')
+        # Instead of processing one-by-one, collect all Goodreads IDs
+        goodreads_ids = [b['goodreads_id'] for b in list_books]
+        created_books = process_book_ids(session, goodreads_ids, source=f'list_{source}', scrape=scrape)
+        for _ in created_books:
+            tracker.increment_imported()
         
         # Print results
         tracker.print_results('books')

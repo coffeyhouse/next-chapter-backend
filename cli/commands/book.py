@@ -1,7 +1,7 @@
 import click
 from sqlalchemy.orm import Session
 from core.sa.database import Database
-from core.resolvers.book_creator import BookCreator
+from core.utils.book_sync_helper import process_book_ids
 from typing import Optional
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -20,7 +20,7 @@ def book():
 @click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
 def create(goodreads_id: str, scrape: bool):
     """Create a book from Goodreads ID
-    
+
     Example:
         cli book create 54493401  # Create Project Hail Mary
         cli book create 7235533 --scrape  # Create The Way of Kings with fresh data
@@ -30,23 +30,21 @@ def create(goodreads_id: str, scrape: bool):
     session = Session(db.engine)
     
     try:
-        # Create book creator
-        creator = BookCreator(session, scrape=scrape)
+        # Use process_book_ids to standardize the existence/scrape logic
+        books = process_book_ids(session, [goodreads_id], source='book', scrape=scrape)
+        book_obj = books[0] if books else None
         
-        # Create the book
-        book = creator.create_book_from_goodreads(goodreads_id)
-        
-        if book is None:
+        if book_obj is None:
             click.echo(f"Book with Goodreads ID {goodreads_id} already exists or could not be created")
             return
         
         # Print success message with book details
-        click.echo(f"Successfully created book:")
-        click.echo(f"  Title: {book.title}")
-        click.echo(f"  Author(s): {', '.join(author.name for author in book.authors)}")
-        click.echo(f"  Genre(s): {', '.join(genre.name for genre in book.genres)}")
-        if book.series:
-            click.echo(f"  Series: {', '.join(series.title for series in book.series)}")
+        click.echo("Successfully created book:")
+        click.echo(f"  Title: {book_obj.title}")
+        click.echo(f"  Author(s): {', '.join(author.name for author in book_obj.authors)}")
+        click.echo(f"  Genre(s): {', '.join(genre.name for genre in book_obj.genres)}")
+        if book_obj.series:
+            click.echo(f"  Series: {', '.join(series.title for series in book_obj.series)}")
         
     except Exception as e:
         click.echo(f"Error creating book: {str(e)}", err=True)

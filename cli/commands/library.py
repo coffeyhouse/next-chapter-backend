@@ -1,22 +1,19 @@
-# core/cli/commands/library.py
 import click
 from sqlalchemy.orm import Session
 from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
-from core.resolvers.book_resolver import BookResolver
 from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
 from core.sa.repositories.user import UserRepository
-# from core.database.queries import get_reading_progress
 import sqlite3
 from ..utils import ProgressTracker, create_progress_bar
-from datetime import datetime, UTC
 from typing import Dict, Any, List
+from core.utils.book_sync_helper import process_book_ids
 
 # Default Calibre database path
 DEFAULT_CALIBRE_PATH = "C:/Users/warre/Calibre Library/metadata.db"
 
 def print_reading_data(data: List[Dict[str, Any]]):
-    """Print reading data in a readable format."""
+    """Print reading progress data in a readable format."""
     print("\nReading Progress Data:")
     print("-" * 80)
     for entry in data:
@@ -50,31 +47,25 @@ def library():
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
 def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool):
     """Import books from Calibre library using SQLAlchemy
-    
+
     This command uses the SQLAlchemy-based BookCreator to import books from Calibre.
     It will create book records with proper relationships for authors, genres, and series.
-    
+
     Example:
         cli library import-calibre-sa --calibre-path "path/to/metadata.db"
         cli library import-calibre-sa --limit 10 --scrape  # Import 10 books with fresh data
     """
-    # Print initial sync information
     if verbose:
         click.echo(click.style("\nImporting from Calibre: ", fg='blue') + 
-                  click.style(calibre_path, fg='cyan'))
+                   click.style(calibre_path, fg='cyan'))
     
-    # Initialize database and session
     db = Database()
     session = Session(db.engine)
     
     try:
-        # Create book creator
         creator = BookCreator(session, scrape=scrape)
-        
-        # Initialize progress tracker
         tracker = ProgressTracker(verbose)
         
-        # Get books from Calibre database
         with sqlite3.connect(calibre_path) as calibre_conn:
             query = """
                 SELECT 
@@ -106,9 +97,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
             if limit:
                 calibre_books = calibre_books[:limit]
             
-            # Process each book
-            with create_progress_bar(calibre_books, verbose, 'Processing books', 
-                                   lambda b: b[1]) as books_iter:
+            with create_progress_bar(calibre_books, verbose, 'Processing books', lambda b: b[1]) as books_iter:
                 for book in books_iter:
                     calibre_data = {
                         'calibre_id': book[0],
@@ -118,10 +107,11 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                     }
                     
                     try:
-                        # Try to create the book
-                        book_obj = creator.create_book_from_goodreads(calibre_data['goodreads_id'], source='library')
+                        # Use process_book_ids to get or create the book
+                        books_created = process_book_ids(session, [calibre_data['goodreads_id']], source='library', scrape=scrape)
+                        book_obj = books_created[0] if books_created else None
+                        
                         if book_obj:
-                            # Create library entry
                             library_entry = Library(
                                 title=calibre_data['title'],
                                 calibre_id=calibre_data['calibre_id'],
@@ -134,14 +124,14 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                             tracker.increment_imported()
                         else:
                             tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
-                                           "Book already exists or was previously scraped")
+                                                "Book already exists or was previously scraped")
                     except Exception as e:
                         tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
-                                       f"Error: {str(e)}", 'red')
+                                             f"Error: {str(e)}", 'red')
+                        session.rollback()
                     
                     tracker.increment_processed()
             
-            # Print results
             tracker.print_results('books')
                       
     except Exception as e:
@@ -149,15 +139,15 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
         raise
     finally:
         session.close()
-        
+
 @library.command()
 @click.option('--force/--no-force', default=False, help='Skip confirmation prompts')
 def empty_db(force: bool):
     """Empty the database of all records
-    
+
     This will delete ALL records from ALL tables. Use with caution.
     Requires confirmation unless --force is used.
-    
+
     Example:
         cli library empty-db  # Will prompt for confirmation
         cli library empty-db --force  # No confirmation prompt
@@ -166,7 +156,6 @@ def empty_db(force: bool):
     session = Session(db.engine)
     
     try:
-        # Get counts before deletion
         counts = {
             'library': session.query(Library).count(),
             'books': session.query(Book).count(),
@@ -185,45 +174,34 @@ def empty_db(force: bool):
             click.echo("Database is already empty.")
             return
             
-        # Show what will be deleted
         click.echo("\nThis will delete:")
         for table, count in counts.items():
             click.echo(f"  - {count} records from {table}")
         click.echo(f"\nTotal: {total_records} records")
         
-        # Confirm unless force flag is used
         if not force:
             click.confirm("\nAre you sure you want to delete ALL records?", abort=True)
             click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
         
-        # Delete in correct order to avoid foreign key constraints
         click.echo("\nDeleting records...")
         
         with click.progressbar(length=9, label='Emptying database') as bar:
             session.query(BookAuthor).delete()
-            bar.update(1)            
-
+            bar.update(1)
             session.query(BookGenre).delete()
             bar.update(1)
-            
             session.query(BookSeries).delete()
             bar.update(1)
-            
             session.query(Library).delete()
             bar.update(1)
-            
             session.query(Book).delete()
             bar.update(1)
-            
             session.query(Author).delete()
             bar.update(1)
-            
             session.query(Genre).delete()
             bar.update(1)
-            
             session.query(Series).delete()
             bar.update(1)
-            
             session.query(BookScraped).delete()
             bar.update(1)
         
@@ -243,63 +221,51 @@ def empty_db(force: bool):
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
 def delete_by_source(source: str, force: bool, verbose: bool):
     """Delete all books from a specific source
-    
+
     This command will delete all books and their relationships that came from the specified source.
     Common sources are: 'library', 'series', 'goodreads'
-    
+
     Example:
         cli library delete-by-source series  # Delete all books from series
         cli library delete-by-source library --force  # Delete library books without confirmation
     """
-    # Initialize database and session
     db = Database()
     session = Session(db.engine)
     
     try:
-        # Get count of books to delete
         count = session.query(Book).filter(Book.source == source).count()
         
         if count == 0:
             click.echo(click.style(f"\nNo books found with source: {source}", fg='yellow'))
             return
             
-        # Show what will be deleted
         click.echo("\n" + click.style(f"This will delete {count} books with source '{source}'", fg='yellow'))
         
-        # Confirm unless force flag is used
         if not force:
             click.confirm("\nAre you sure you want to delete these books?", abort=True)
             click.confirm("Are you REALLY sure? This cannot be undone!", abort=True)
         
-        # Initialize progress tracker
         tracker = ProgressTracker(verbose)
-        
-        # Get books to delete
         books = session.query(Book).filter(Book.source == source).all()
         
-        # Process each book
-        with create_progress_bar(books, verbose, 'Deleting books', 
-                               lambda b: b.title) as books_iter:
+        with create_progress_bar(books, verbose, 'Deleting books', lambda b: b.title) as books_iter:
             for book in books_iter:
                 try:
-                    # Delete relationships first
                     session.query(BookAuthor).filter_by(work_id=book.work_id).delete()
                     session.query(BookGenre).filter_by(work_id=book.work_id).delete()
                     session.query(BookSeries).filter_by(work_id=book.work_id).delete()
                     session.query(Library).filter_by(work_id=book.work_id).delete()
                     session.query(BookScraped).filter_by(work_id=book.work_id).delete()
                     
-                    # Delete the book
                     session.delete(book)
                     session.commit()
                     tracker.increment_processed()
                     
                 except Exception as e:
                     tracker.add_skipped(book.title, book.goodreads_id,
-                                   f"Error: {str(e)}", 'red')
+                                        f"Error: {str(e)}", 'red')
                     session.rollback()
         
-        # Print results
         tracker.print_results('books')
                       
     except Exception as e:
@@ -313,29 +279,24 @@ def delete_by_source(source: str, force: bool, verbose: bool):
 @click.option('--dry-run', is_flag=True, help="Print data without making changes")
 def sync_reading(calibre_path: str, dry_run: bool):
     """Sync reading progress from Calibre database
-    
+
     Example:
         cli library sync-reading  # Sync with default Calibre path
         cli library sync-reading --calibre-path "path/to/metadata.db"  # Use custom path
         cli library sync-reading --dry-run  # Preview changes without applying them
     """
-    # Get reading progress data
     data = get_reading_progress(calibre_path)
-    
-    # Print the data
     print_reading_data(data)
     
     if dry_run:
         print("\nDry run - no changes made")
         return
         
-    # Initialize database
     db = Database()
     session: Session = db.get_session()
     user_repo = UserRepository(session)
     
     try:
-        # Get or create users
         warren = user_repo.get_or_create_user("Warren")
         ruth = user_repo.get_or_create_user("Ruth")
         
@@ -343,7 +304,6 @@ def sync_reading(calibre_path: str, dry_run: bool):
         print(f"Warren (ID: {warren.id})")
         print(f"Ruth (ID: {ruth.id})")
         
-        # Process each book
         total_processed = 0
         warren_updates = 0
         ruth_updates = 0
@@ -351,7 +311,6 @@ def sync_reading(calibre_path: str, dry_run: bool):
         for entry in data:
             print(f"\nProcessing book: {entry['title']}")
             
-            # Update Warren's status if there's progress
             if entry['warren_read_percent'] > 0:
                 status = determine_status(entry['warren_read_percent'])
                 print(f"Warren's status: {status} ({entry['warren_read_percent']}%)")
@@ -360,7 +319,7 @@ def sync_reading(calibre_path: str, dry_run: bool):
                     goodreads_id=entry['goodreads_id'],
                     status=status,
                     source="calibre",
-                    started_at=None,  # We don't have this information
+                    started_at=None,
                     finished_at=entry['warren_last_read'] if status == "completed" else None
                 )
                 if result:
@@ -369,7 +328,6 @@ def sync_reading(calibre_path: str, dry_run: bool):
                 else:
                     print("Failed to update Warren's status")
             
-            # Update Ruth's status if there's progress
             if entry['ruth_read_percent'] > 0:
                 status = determine_status(entry['ruth_read_percent'])
                 print(f"Ruth's status: {status} ({entry['ruth_read_percent']}%)")
@@ -378,7 +336,7 @@ def sync_reading(calibre_path: str, dry_run: bool):
                     goodreads_id=entry['goodreads_id'],
                     status=status,
                     source="calibre",
-                    started_at=None,  # We don't have this information
+                    started_at=None,
                     finished_at=entry['ruth_last_read'] if status == "completed" else None
                 )
                 if result:
@@ -403,30 +361,27 @@ def sync_reading(calibre_path: str, dry_run: bool):
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
 def reset_sync(table: str, force: bool, verbose: bool):
     """Reset the sync date for all records in a table
-    
+
     This will set last_synced_at (or similar_synced_at for book-similar) to NULL for all records,
     causing them to be picked up by the next sync operation.
-    
+
     Valid tables are:
     - book: Reset last_synced_at for all books
     - book-similar: Reset similar_synced_at for all books
     - author: Reset sync dates for all authors
     - series: Reset sync dates for all series
     - library: Reset sync dates for all library entries
-    
+
     Example:
         cli library reset-sync series  # Reset series sync dates
         cli library reset-sync book --force  # Reset book sync dates without confirmation
         cli library reset-sync book-similar  # Reset similar book sync dates
     """
-    # Initialize database and session
     db = Database()
     session = Session(db.engine)
     
     try:
-        # Special handling for book-similar which uses a different column
         if table == 'book-similar':
-            # Get count of records to reset
             count = session.query(Book).filter(
                 (Book.similar_synced_at.isnot(None)) | 
                 (Book.similar_synced_at == '')
@@ -436,30 +391,23 @@ def reset_sync(table: str, force: bool, verbose: bool):
                 click.echo(click.style("\nNo books found with similar sync dates to reset", fg='yellow'))
                 return
                 
-            # Show what will be reset
             click.echo("\n" + click.style(f"This will reset the similar sync date for {count} books", fg='yellow'))
             
-            # Confirm unless force flag is used
             if not force:
                 click.confirm("\nAre you sure you want to reset these similar sync dates?", abort=True)
             
-            # Reset all similar sync dates in a single update
             session.query(Book).filter(
                 (Book.similar_synced_at.isnot(None)) | 
                 (Book.similar_synced_at == '')
             ).update({Book.similar_synced_at: None}, synchronize_session=False)
-            
-            # Commit the changes
             session.commit()
             
-            # Print results
             click.echo("\n" + click.style("Results:", fg='blue'))
             click.echo(click.style("Reset: ", fg='blue') + 
-                      click.style(str(count), fg='green') + 
-                      click.style(" book similar sync dates", fg='blue'))
+                       click.style(str(count), fg='green') + 
+                       click.style(" book similar sync dates", fg='blue'))
             return
             
-        # Regular sync date handling for other tables
         table_map = {
             'book': Book,
             'author': Author,
@@ -468,8 +416,6 @@ def reset_sync(table: str, force: bool, verbose: bool):
         }
         
         model = table_map[table]
-        
-        # Get count of records to reset - include both non-null and empty string values
         count = session.query(model).filter(
             (model.last_synced_at.isnot(None)) | 
             (model.last_synced_at == '')
@@ -479,27 +425,21 @@ def reset_sync(table: str, force: bool, verbose: bool):
             click.echo(click.style(f"\nNo {table} records found with sync dates to reset", fg='yellow'))
             return
             
-        # Show what will be reset
         click.echo("\n" + click.style(f"This will reset the sync date for {count} {table} records", fg='yellow'))
         
-        # Confirm unless force flag is used
         if not force:
             click.confirm("\nAre you sure you want to reset these sync dates?", abort=True)
         
-        # Reset all sync dates in a single update
         session.query(model).filter(
             (model.last_synced_at.isnot(None)) | 
             (model.last_synced_at == '')
         ).update({model.last_synced_at: None}, synchronize_session=False)
-        
-        # Commit the changes
         session.commit()
         
-        # Print results
         click.echo("\n" + click.style("Results:", fg='blue'))
         click.echo(click.style("Reset: ", fg='blue') + 
-                  click.style(str(count), fg='green') + 
-                  click.style(f" {table} records", fg='blue'))
+                   click.style(str(count), fg='green') + 
+                   click.style(f" {table} records", fg='blue'))
                       
     except Exception as e:
         session.rollback()

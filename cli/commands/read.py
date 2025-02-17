@@ -1,13 +1,12 @@
+
 import click
 import json
 from datetime import datetime
 from sqlalchemy.orm import Session
-from core.resolvers.book_resolver import BookResolver
-from core.resolvers.book_creator import BookCreator
-from core.sa.models import User, Book, BookUser
-from core.sa.repositories.book import BookRepository
+from core.sa.models import User, BookUser
 from core.sa.repositories.user import UserRepository
 from core.sa.database import Database
+from core.utils.book_sync_helper import process_book_ids
 
 @click.command()
 @click.argument('json_file', type=click.Path(exists=True))
@@ -16,21 +15,16 @@ from core.sa.database import Database
 def read(json_file, user_id, dry_run):
     """Import read books from a JSON file containing Goodreads IDs and read dates."""
     try:
-        # Initialize database and session
         db = Database()
         session = Session(db.engine)
         
         user_repo = UserRepository(session)
-        book_repo = BookRepository(session)
-        book_creator = BookCreator(session, scrape=True)
         
-        # Check if user exists
         user = user_repo.get_by_id(user_id)
         if not user:
             if dry_run:
                 click.echo(f"Would create new user with ID: {user_id}")
             else:
-                # Prompt for user name
                 name = click.prompt("User not found. Please enter a name for the new user")
                 user = User(id=user_id, name=name)
                 session.add(user)
@@ -39,7 +33,6 @@ def read(json_file, user_id, dry_run):
         else:
             click.echo(f"Using existing user: {user.name} (ID: {user_id})")
         
-        # Load the JSON file
         with open(json_file, 'r') as f:
             books = json.load(f)
         
@@ -59,7 +52,6 @@ def read(json_file, user_id, dry_run):
                 
             click.echo(f"\nProcessing: {title} (ID: {goodreads_id})")
             
-            # Convert date_read to proper format or None
             parsed_date = None
             if date_read:
                 try:
@@ -72,21 +64,19 @@ def read(json_file, user_id, dry_run):
                 processed += 1
                 continue
             
-            # Get or create the book
-            book = book_repo.get_by_goodreads_id(goodreads_id)
-            if not book:
-                book = book_creator.create_book_from_goodreads(goodreads_id)
+            # Use process_book_ids to get or create the book record
+            books_created = process_book_ids(session, [goodreads_id], source='read', scrape=True)
+            book_obj = books_created[0] if books_created else None
             
-            if book:
-                # Update reading status
+            if book_obj:
                 book_user = session.query(BookUser).filter_by(
-                    work_id=book.work_id,
+                    work_id=book_obj.work_id,
                     user_id=user_id
                 ).first()
                 
                 if not book_user:
                     book_user = BookUser(
-                        work_id=book.work_id,
+                        work_id=book_obj.work_id,
                         user_id=user_id,
                         status='completed',
                         finished_at=parsed_date
@@ -111,7 +101,8 @@ def read(json_file, user_id, dry_run):
         click.echo(f"Error: {e}", err=True)
         raise click.Abort()
     finally:
-        session.close() 
+        session.close()
+
         
 #         Code for the console:
 #             // Select all book rows in the table
