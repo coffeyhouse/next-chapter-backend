@@ -27,6 +27,11 @@ class BookResolver:
             print(f"Failed to scrape the main book page for ID: {goodreads_id}")
             return None
 
+        # Validate required fields
+        if not main_book_data.get('work_id'):
+            print(f"Book {goodreads_id} has no work_id")
+            return None
+
         # Check if main book meets criteria before scraping editions
         valid_formats = ['Kindle Edition', 'Paperback', 'Hardcover', 'Mass Market Paperback', 'ebook']
         
@@ -45,47 +50,55 @@ class BookResolver:
         else:
             print(f"Book {goodreads_id} ({main_book_data.get('title', 'Unknown Title')}) doesn't meet criteria: {', '.join(missing_criteria)}")
 
+        # Store the main book's validation issues for later use if no valid editions found
+        main_validation = {
+            'hidden': True,
+            'hidden_reason': (
+                HiddenReason.PAGE_COUNT_UNKNOWN if not main_book_data.get('pages')
+                else HiddenReason.NO_ENGLISH_EDITIONS if main_book_data.get('language') != 'English'
+                else HiddenReason.INVALID_FORMAT if main_book_data.get('format') not in valid_formats
+                else HiddenReason.INVALID_PUBLICATION
+            )
+        }
+
         # Step 2: Use the work id from the main book data to scrape the editions page.
         work_id = main_book_data.get('work_id')
         if not work_id:
             print("No work id found")
-            return None
+            # Return main book data with validation issues
+            main_book_data.update(main_validation)
+            return main_book_data
 
         editions = self.editions_scraper.scrape_editions(work_id)
         
         # If no editions found, mark the main book as hidden with NO_ENGLISH_EDITIONS reason
         if not editions:
             print("No editions found - storing main book data as hidden")
-            main_book_data['hidden'] = True
-            main_book_data['hidden_reason'] = HiddenReason.NO_ENGLISH_EDITIONS
+            main_book_data.update(main_validation)
             return main_book_data
             
         # If we found editions but none are in English, mark the main book as hidden
         if not self.editions_scraper.has_english_editions:
             print("No English editions found - storing main book data as hidden")
-            main_book_data['hidden'] = True
-            main_book_data['hidden_reason'] = HiddenReason.NO_ENGLISH_EDITIONS
+            main_book_data.update(main_validation)
             return main_book_data
             
         # If we found editions but none have a valid format, mark the main book as hidden
         if not self.editions_scraper.has_valid_format:
             print("No valid format found - storing main book data as hidden")
-            main_book_data['hidden'] = True
-            main_book_data['hidden_reason'] = HiddenReason.INVALID_FORMAT
+            main_book_data.update(main_validation)
             return main_book_data
             
         # If we found editions but none have a page count, mark the main book as hidden
         if not self.editions_scraper.has_page_count:
             print("No page count found - storing main book data as hidden")
-            main_book_data['hidden'] = True
-            main_book_data['hidden_reason'] = HiddenReason.PAGE_COUNT_UNKNOWN
+            main_book_data.update(main_validation)
             return main_book_data
             
         # If we found editions but none have a valid publication date, mark the main book as hidden
         if not self.editions_scraper.has_valid_publication:
             print("No valid publication date found - storing main book data as hidden")
-            main_book_data['hidden'] = True
-            main_book_data['hidden_reason'] = HiddenReason.INVALID_PUBLICATION
+            main_book_data.update(main_validation)
             return main_book_data
 
         # Step 3: Choose the first edition from the list.
@@ -101,4 +114,6 @@ class BookResolver:
             print("Failed to fully scrape chosen edition")
             return None
 
+        # Ensure work_id is preserved when using edition data
+        final_book_data['work_id'] = work_id
         return final_book_data
