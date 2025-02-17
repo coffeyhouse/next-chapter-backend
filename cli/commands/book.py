@@ -154,40 +154,150 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
         
     click.echo("\nFinished updating book covers")
 
+def _check_combined_titles(session: Session, book: Book) -> tuple[bool, list[tuple[str, str]]]:
+    """Check if a book title appears to contain multiple books by comparing with other titles from the same author(s)
+    
+    Returns:
+        Tuple of (is_combined, list of matched parts with their work_ids)
+    """
+    # Common separators that might indicate multiple books
+    separators = [
+        '/',           # "Book1/Book2"
+        ' & ',         # "Book1 & Book2"
+        ' and ',       # "Book1 and Book2"
+        ', ',          # "Book1, Book2"
+        ': ',          # "Collection: Book1, Book2"
+    ]
+    
+    # Get all authors for this book
+    author_ids = [ba.author_id for ba in book.book_authors]
+    if not author_ids:
+        return False, []
+        
+    # Get all books by these authors
+    other_books = (
+        session.query(Book)
+        .join(BookAuthor)
+        .filter(BookAuthor.author_id.in_(author_ids))
+        .filter(Book.work_id != book.work_id)  # Exclude current book
+        .all()
+    )
+    
+    # Get all titles by these authors (excluding current book)
+    author_titles = {b.title.lower().strip(): b for b in other_books}
+    
+    # Check the current book title against common patterns
+    title = book.title
+    
+    # First check if the title contains any separators
+    if not any(sep in title for sep in separators):
+        return False, []
+        
+    # Split the title by various separators and clean up the parts
+    parts = []
+    working_title = title
+    
+    # Handle "Collection:" or similar prefixes
+    if ': ' in working_title:
+        _, working_title = working_title.split(': ', 1)
+    
+    # Split by various separators
+    for sep in separators:
+        if sep in working_title:
+            # Split and clean up parts
+            split_parts = [p.strip() for p in working_title.split(sep)]
+            # Only add non-empty parts that don't contain other separators
+            for part in split_parts:
+                if part and not any(s in part for s in separators):
+                    parts.append(part)
+            
+    # Remove duplicates and empty strings
+    parts = [p for p in set(parts) if p]
+    
+    # Only consider it a match if:
+    # 1. We have at least 2 parts
+    # 2. ALL parts match other book titles exactly
+    # 3. The matches are different books (different work IDs)
+    # 4. The title contains one of our explicit separators
+    if len(parts) >= 2:
+        matches = []
+        for part in parts:
+            part_lower = part.lower()
+            if part_lower in author_titles:
+                matched_book = author_titles[part_lower]
+                matches.append((matched_book.title, matched_book.work_id))
+        
+        # All parts must match exactly and be different books
+        if len(matches) == len(parts) and len(set(m[1] for m in matches)) == len(matches):
+            return True, matches
+        
+    return False, []
+
 @book.command()
 @click.option('--limit', default=None, type=int, help='Limit number of books to check')
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
-def check_exclusions(limit: Optional[int], verbose: bool):
+@click.option('--work-id', default=None, help='Check a specific book by work ID')
+def check_exclusions(limit: Optional[int], verbose: bool, work_id: Optional[str]):
     """Check existing books against exclusion rules and update their hidden status.
     
     Example:
         cli book check-exclusions  # Check all books
         cli book check-exclusions --limit 100  # Check first 100 books
         cli book check-exclusions --verbose  # Show detailed progress of changes
+        cli book check-exclusions --work-id 207476286  # Check specific book
     """
     # Initialize database and session
     db = Database()
     session = Session(db.engine)
     
     try:
-        # Get all books with their relationships
-        query = (
-            session.query(Book)
-            .outerjoin(BookAuthor)
-            .outerjoin(BookGenre)
-        )
-        
-        if limit:
-            query = query.limit(limit)
+        # Get books to check
+        if work_id:
+            books = [session.query(Book).filter(Book.work_id == work_id).first()]
+            if not books[0]:
+                click.echo(f"\nNo book found with work ID: {work_id}")
+                return
+            total_books = 1
+        else:
+            # Get all books with their relationships
+            query = (
+                session.query(Book)
+                .outerjoin(BookAuthor)
+                .outerjoin(BookGenre)
+            )
             
-        books = query.all()
-        total_books = len(books)
+            if limit:
+                query = query.limit(limit)
+                
+            books = query.all()
+            total_books = len(books)
+            
         excluded_books = []
         updated_books = []
+        combined_titles = []
         
         click.echo(f"\nChecking {total_books} books against exclusion rules...")
         
         for i, book in enumerate(books, 1):
+            # Check for combined titles
+            is_combined, matches = _check_combined_titles(session, book)
+            if is_combined:
+                combined_titles.append((book, matches))
+                # Mark as hidden with combined edition reason
+                if not book.hidden or book.hidden_reason != HiddenReason.COMBINED_EDITION:
+                    book.hidden = True
+                    book.hidden_reason = HiddenReason.COMBINED_EDITION
+                    updated_books.append((book, f"Hidden: Combined edition containing {', '.join(m[0] for m in matches)}"))
+                if verbose:
+                    click.echo(f"\nCombined title found: {book.title}")
+                    click.echo("Contains:")
+                    for title, work_id in matches:
+                        click.echo(f"  - {title} (work_id: {work_id})")
+                    click.echo("Authors:")
+                    for ba in book.book_authors:
+                        click.echo(f"  - {ba.author.name}")
+                continue
+                
             # Convert SQLAlchemy model to dict format expected by exclusions
             book_dict = {
                 "title": book.title,
@@ -227,6 +337,18 @@ def check_exclusions(limit: Optional[int], verbose: bool):
                     updated_books.append((book, "Unhidden: no longer meets exclusion criteria"))
                     if verbose:
                         click.echo(f"[{i}/{total_books}] {book.title} - Now unhidden (no longer meets exclusion criteria)")
+        
+        # Print combined titles results
+        if combined_titles:
+            click.echo("\nFound combined titles:")
+            for book, matches in combined_titles:
+                click.echo(f"\n{book.title} (work_id: {book.work_id})")
+                click.echo("Contains:")
+                for title, work_id in matches:
+                    click.echo(f"  - {title} (work_id: {work_id})")
+                click.echo("Authors:")
+                for ba in book.book_authors:
+                    click.echo(f"  - {ba.author.name}")
         
         # Commit changes
         if updated_books:

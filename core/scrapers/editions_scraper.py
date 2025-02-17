@@ -10,6 +10,10 @@ class EditionsScraper:
     
     def __init__(self, scrape: bool = False):
         self.downloader = GoodreadsDownloader(scrape)
+        self.has_english_editions = False
+        self.has_valid_format = False
+        self.has_page_count = False
+        self.has_valid_publication = False
     
     def scrape_editions(self, work_id: str) -> list[dict]:
         """
@@ -28,6 +32,11 @@ class EditionsScraper:
             }
         ]
         """
+        # Reset all flags
+        self.has_english_editions = False
+        self.has_valid_format = False
+        self.has_page_count = False
+        self.has_valid_publication = False
         
         # Get first page content
         url = self._get_page_url(work_id, 1)
@@ -107,10 +116,16 @@ class EditionsScraper:
                     format_match = re.search(r'(Paperback|Hardcover|Kindle Edition|ebook|Mass Market Paperback)', text, re.IGNORECASE)
                     if format_match:
                         edition['format'] = format_match.group(1)
+                        # Track if we've found a valid format
+                        if edition['format'] in valid_formats:
+                            self.has_valid_format = True
                     
                     pages_match = re.search(r'(\d+)\s*pages?', text)
                     if pages_match:
                         edition['pages'] = int(pages_match.group(1))
+                        # Track if we've found any page counts
+                        if edition['pages'] > 0:
+                            self.has_page_count = True
                 
                 # Get published date
                 pub_div = details.find('div', text=re.compile(r'Published|Expected publication'))
@@ -123,11 +138,16 @@ class EditionsScraper:
                         # Only set if it looks like a real date (not just "by Publisher")
                         if not date_text.startswith('by '):
                             edition['published_date'] = date_text
+                            # Track if we've found any valid publication dates
+                            self.has_valid_publication = True
                 
                 # Get language
                 language_div = details.find('div', text=lambda x: x and 'Edition language:' in x)
                 if language_div and language_div.find_next('div', class_='dataValue'):
                     edition['language'] = language_div.find_next('div', class_='dataValue').text.strip()
+                    # Track if we've found any English editions
+                    if edition['language'] == 'English':
+                        self.has_english_editions = True
                 
                 # Get rating and rating count
                 rating_div = details.find('div', text=lambda x: x and 'Average rating:' in x)

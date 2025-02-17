@@ -2,6 +2,7 @@
 
 from core.scrapers.book_scraper import BookScraper
 from core.scrapers.editions_scraper import EditionsScraper
+from core.models.book import HiddenReason
 
 class BookResolver:
     def __init__(self, scrape: bool = False):
@@ -51,9 +52,41 @@ class BookResolver:
             return None
 
         editions = self.editions_scraper.scrape_editions(work_id)
+        
+        # If no editions found, mark the main book as hidden with NO_ENGLISH_EDITIONS reason
         if not editions:
-            print("No editions found")
-            return None
+            print("No editions found - storing main book data as hidden")
+            main_book_data['hidden'] = True
+            main_book_data['hidden_reason'] = HiddenReason.NO_ENGLISH_EDITIONS
+            return main_book_data
+            
+        # If we found editions but none are in English, mark the main book as hidden
+        if not self.editions_scraper.has_english_editions:
+            print("No English editions found - storing main book data as hidden")
+            main_book_data['hidden'] = True
+            main_book_data['hidden_reason'] = HiddenReason.NO_ENGLISH_EDITIONS
+            return main_book_data
+            
+        # If we found editions but none have a valid format, mark the main book as hidden
+        if not self.editions_scraper.has_valid_format:
+            print("No valid format found - storing main book data as hidden")
+            main_book_data['hidden'] = True
+            main_book_data['hidden_reason'] = HiddenReason.INVALID_FORMAT
+            return main_book_data
+            
+        # If we found editions but none have a page count, mark the main book as hidden
+        if not self.editions_scraper.has_page_count:
+            print("No page count found - storing main book data as hidden")
+            main_book_data['hidden'] = True
+            main_book_data['hidden_reason'] = HiddenReason.PAGE_COUNT_UNKNOWN
+            return main_book_data
+            
+        # If we found editions but none have a valid publication date, mark the main book as hidden
+        if not self.editions_scraper.has_valid_publication:
+            print("No valid publication date found - storing main book data as hidden")
+            main_book_data['hidden'] = True
+            main_book_data['hidden_reason'] = HiddenReason.INVALID_PUBLICATION
+            return main_book_data
 
         # Step 3: Choose the first edition from the list.
         chosen_edition = editions[0]

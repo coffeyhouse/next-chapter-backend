@@ -29,9 +29,11 @@ EXCLUSION_RULES = {
         "Illustrated Movie Companion",        
         "Illustrated guide",
         "Review Summary",
-        "collection: "
+        "collection: ",
+        "unofficial guide",
+        "Unauthorized guide"
     ],     
-    "max_pages": 1800,                     # Exclude books with more than 1800 pages
+    "max_pages": 1600,                     # Exclude books with more than 1600 pages
 }
 
 class ExclusionResult(NamedTuple):

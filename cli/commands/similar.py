@@ -9,6 +9,7 @@ from core.sa.repositories.book import BookRepository
 from core.sa.models import Book, BookSimilar, BookScraped
 from ..utils import ProgressTracker, print_sync_start, create_progress_bar
 from datetime import datetime, UTC
+import time
 
 @click.group()
 def similar():
@@ -21,7 +22,8 @@ def similar():
 @click.option('--goodreads-id', default=None, help='Sync similar books for a specific book by Goodreads ID')
 @click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
-def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool):
+@click.option('--retry/--no-retry', default=True, help='Whether to retry failed book creation')
+def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool, retry: bool):
     """Sync similar books relationships using SQLAlchemy
     
     This command finds and creates relationships between similar books using Goodreads data.
@@ -89,18 +91,31 @@ def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: b
                     for i, similar_book_data in enumerate(similar_books, 1):
                         try:
                             # Try to create the similar book; if already scraped, it may return None
-                            similar_book = creator.create_book_from_goodreads(
-                                similar_book_data['goodreads_id'], 
-                                source='similar'
-                            )
+                            similar_book = None
+                            attempts = 2 if retry else 1
+                            
+                            for attempt in range(attempts):
+                                similar_book = creator.create_book_from_goodreads(
+                                    similar_book_data['goodreads_id'], 
+                                    source='similar'
+                                )
+                                if similar_book:
+                                    break
+                                elif attempt < attempts - 1:  # Only sleep if we're going to retry
+                                    time.sleep(1)  # Wait a bit before retrying
+                            
                             if similar_book is None:
-                                # Look up the scraped entry to get the work_id
-                                scraped = session.query(BookScraped).filter_by(
-                                    goodreads_id=similar_book_data['goodreads_id']
-                                ).first()
-                                if scraped and scraped.work_id:
-                                    # Look up the book record in the Book table
-                                    similar_book = book_repo.get_by_work_id(scraped.work_id)
+                                # First try to find the book directly by goodreads_id
+                                similar_book = book_repo.get_by_goodreads_id(similar_book_data['goodreads_id'])
+                                
+                                # If not found, try looking up the scraped entry to get the work_id
+                                if not similar_book:
+                                    scraped = session.query(BookScraped).filter_by(
+                                        goodreads_id=similar_book_data['goodreads_id']
+                                    ).first()
+                                    if scraped and scraped.work_id:
+                                        # Look up the book record in the Book table
+                                        similar_book = book_repo.get_by_work_id(scraped.work_id)
                             
                             # Only proceed if we found a valid Book record
                             if similar_book:
@@ -121,22 +136,19 @@ def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: b
                                 tracker.add_skipped(
                                     similar_book_data.get('title', 'Unknown'),
                                     similar_book_data.get('goodreads_id', 'Unknown'),
-                                    "No matching book found in Book table",
+                                    "Failed to create or find book",
                                     'red'
                                 )
                             
                             # Update progress for verbose mode
                             if verbose:
-                                click.echo(
-                                    click.style(f"  {i}/{total_similar}: ", fg='blue') +
-                                    click.style(similar_book_data.get('title', 'Unknown'), fg='cyan')
-                                )
+                                click.echo(f"  {similar_book_data.get('title', 'Unknown')}")
                             
                         except Exception as e:
                             tracker.add_skipped(
-                                similar_book_data.get('title', 'Unknown'), 
+                                similar_book_data.get('title', 'Unknown'),
                                 similar_book_data.get('goodreads_id', 'Unknown'),
-                                f"Error: {str(e)}", 
+                                f"Error: {str(e)}",
                                 'red'
                             )
                     
@@ -152,7 +164,7 @@ def sync_sa(limit: int, source: str, goodreads_id: str, scrape: bool, verbose: b
                     
                 except Exception as e:
                     tracker.add_skipped(book.title, book.goodreads_id,
-                                    f"Error: {str(e)}", 'red')
+                                     f"Error: {str(e)}", 'red')
                     tracker.increment_processed()
         
         # Print results

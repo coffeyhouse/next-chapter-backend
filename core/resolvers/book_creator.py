@@ -30,22 +30,33 @@ class BookCreator:
         already_scraped = self.session.query(BookScraped).filter_by(
             goodreads_id=goodreads_id
         ).first()
-        if already_scraped:
-            return None
-
+        
         # Check if book already exists by goodreads_id
         existing_book = self.book_repository.get_by_goodreads_id(goodreads_id)
         if existing_book:
             return None
 
+        # If book was scraped before but doesn't exist in Book table, we should try again
+        if already_scraped:
+            # Only skip if we find a matching book by work_id
+            if already_scraped.work_id:
+                existing_book = self.book_repository.get_by_work_id(already_scraped.work_id)
+                if existing_book:
+                    return None
+            # Delete the old scraped record since we're going to try again
+            self.session.delete(already_scraped)
+            self.session.commit()
+
         # Resolve book data
         book_data = self.resolver.resolve_book(goodreads_id)
         if not book_data:            
+            print(f"Failed to resolve book data for {goodreads_id}")
             return None
 
         # Check exclusions before proceeding
         exclusion_result = get_exclusion_reason(book_data)
         if exclusion_result:
+            print(f"Book {goodreads_id} excluded: {exclusion_result.reason}")
             # Set the book as hidden with the reason
             book_data['hidden'] = True
             book_data['hidden_reason'] = exclusion_result.hidden_reason
@@ -77,13 +88,18 @@ class BookCreator:
         if work_id:
             existing_book = self.book_repository.get_by_work_id(work_id)
             if existing_book:
+                print(f"Book {goodreads_id} exists by work_id {work_id}")
                 return None
 
         # Set the source in the book data
         book_data['source'] = source
 
-        # Create the book
-        return self.create_book(book_data)
+        try:
+            # Create the book
+            return self.create_book(book_data)
+        except Exception as e:
+            print(f"Error creating book {goodreads_id}: {str(e)}")
+            return None
 
     def create_book(self, book_data: Dict[str, Any]) -> Book:
         """

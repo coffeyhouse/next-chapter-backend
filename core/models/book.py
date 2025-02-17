@@ -32,6 +32,7 @@ class HiddenReason(str, Enum):
     # Title Issues
     TITLE_PATTERN_MATCH = "title_pattern_match"     # Title contains excluded pattern
     TITLE_NUMBER_PATTERN = "title_number_pattern"   # Title contains number pattern
+    COMBINED_EDITION = "combined_edition"           # Book is a combined edition of multiple books
 
     # Publication Info
     INVALID_PUBLICATION = "invalid_publication" # Invalid or missing publication info
