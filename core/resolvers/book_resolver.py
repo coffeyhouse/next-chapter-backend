@@ -2,7 +2,7 @@
 
 from core.scrapers.book_scraper import BookScraper
 from core.scrapers.editions_scraper import EditionsScraper
-from core.models.book import HiddenReason
+from core.sa.models.book import HiddenReason
 
 class BookResolver:
     def __init__(self, scrape: bool = False):

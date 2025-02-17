@@ -8,7 +8,7 @@ from PIL import Image
 from io import BytesIO
 from core.exclusions import get_exclusion_reason
 from core.sa.models import Book, BookAuthor, BookGenre
-from core.models.book import HiddenReason
+from core.sa.models.book import HiddenReason
 
 @click.group()
 def book():

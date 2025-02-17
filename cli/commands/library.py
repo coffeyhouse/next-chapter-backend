@@ -1,15 +1,14 @@
 # core/cli/commands/library.py
 import click
-from core.database import GoodreadsDB
 from sqlalchemy.orm import Session
 from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
 from core.resolvers.book_resolver import BookResolver
 from core.sa.models import Book, Author, Genre, Series, BookAuthor, BookGenre, BookSeries, Library, BookScraped
 from core.sa.repositories.user import UserRepository
-from core.database.queries import get_reading_progress
+# from core.database.queries import get_reading_progress
 import sqlite3
-from ..utils import ProgressTracker, print_sync_start, create_progress_bar, update_last_synced
+from ..utils import ProgressTracker, create_progress_bar
 from datetime import datetime, UTC
 from typing import Dict, Any, List
 
@@ -150,41 +149,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
         raise
     finally:
         session.close()
-
-@library.command()
-@click.option('--db-path', '--db', default="books.db", help='Path to books database')
-def stats(db_path: str):
-    """Show library statistics"""
-    db = GoodreadsDB(db_path)
-    stats = db.get_stats()
-    
-    click.echo("\nLibrary Statistics:")
-    for table, count in stats.items():
-        click.echo(f"{table}: {count} records")
-
-@library.command()
-@click.argument('goodreads_id')
-@click.option('--db-path', '--db', default="books.db", help='Path to books database')
-@click.option('--force/--no-force', default=False, help='Skip confirmation prompt')
-def delete(goodreads_id: str, db_path: str, force: bool):
-    """Delete a book and its relationships from the database"""
-    db = GoodreadsDB(db_path)
-    
-    # Get book details first
-    book = db.get_by_id('book', goodreads_id, id_field='goodreads_id')
-    if not book:
-        click.echo(click.style(f"\nNo book found with ID: {goodreads_id}", fg='red'))
-        return
         
-    # Show confirmation unless force flag is used
-    if not force:
-        click.confirm(f"\nAre you sure you want to delete '{book['title']}'?", abort=True)
-    
-    if db.delete_book(goodreads_id):
-        click.echo(click.style(f"\nSuccessfully deleted '{book['title']}'", fg='green'))
-    else:
-        click.echo(click.style("\nFailed to delete book", fg='red'))
-
 @library.command()
 @click.option('--force/--no-force', default=False, help='Skip confirmation prompts')
 def empty_db(force: bool):

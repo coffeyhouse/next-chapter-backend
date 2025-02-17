@@ -6,8 +6,6 @@ from .commands.dev import dev
 from .commands.series import series
 from .commands.author import author
 from .commands.similar import similar
-from .commands.genre import genre
-from .commands.chain import chain
 from .commands.book import book
 from .commands.list import list
 from .commands.monitor import monitor
@@ -24,8 +22,6 @@ cli.add_command(dev)
 cli.add_command(series)
 cli.add_command(author)
 cli.add_command(similar)
-cli.add_command(genre)
-cli.add_command(chain)
 cli.add_command(book)
 cli.add_command(list)
 cli.add_command(monitor)

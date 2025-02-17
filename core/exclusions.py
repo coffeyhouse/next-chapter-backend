@@ -1,6 +1,6 @@
 # core/exclusions.py
 from typing import Optional, Tuple, NamedTuple
-from core.models.book import HiddenReason
+from core.sa.models.book import HiddenReason
 import re
 
 EXCLUSION_RULES = {
