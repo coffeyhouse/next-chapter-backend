@@ -1,5 +1,4 @@
 import click
-from core.database import GoodreadsDB
 from sqlalchemy.orm import Session
 from core.sa.database import Database
 from core.resolvers.book_creator import BookCreator
