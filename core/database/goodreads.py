@@ -448,7 +448,7 @@ class GoodreadsDB(BaseDB):
                 relation_data = {
                     'work_id': work_id,
                     'series_id': series['goodreads_id'],
-                    'series_order': series['order'],
+                    'series_order': str(series['order']) if series['order'] is not None else None,
                     'created_at': now,
                     'updated_at': now
                 }

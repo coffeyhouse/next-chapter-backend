@@ -11,6 +11,7 @@ from .commands.chain import chain
 from .commands.book import book
 from .commands.list import list
 from .commands.monitor import monitor
+from .commands.read import read
 
 @click.group()
 def cli():
@@ -28,6 +29,7 @@ cli.add_command(chain)
 cli.add_command(book)
 cli.add_command(list)
 cli.add_command(monitor)
+cli.add_command(read)
 
 def main():
     """Entry point for the CLI"""

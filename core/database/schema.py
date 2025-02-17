@@ -60,7 +60,7 @@ def init_db(db_path: str = "books.db"):
             CREATE TABLE IF NOT EXISTS book_series (
                 work_id TEXT,
                 series_id TEXT,
-                series_order REAL,
+                series_order TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (work_id, series_id),

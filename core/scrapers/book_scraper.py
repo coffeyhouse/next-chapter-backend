@@ -282,10 +282,8 @@ class BookScraper:
                     order = None
                     if '#' in text:
                         name, number = text.split('#')
-                        try:
-                            order = float(number.strip())
-                        except ValueError:
-                            pass
+                        number = number.strip()
+                        order = number
                     
                     series.append({
                         'goodreads_id': main_series_id,
@@ -315,7 +313,8 @@ class BookScraper:
                         series.append({
                             'goodreads_id': series_id,
                             'name': value.get('title', ''),
-                            'order': None  # Additional series typically don't have order
+                            'order': None,  # Additional series typically don't have order
+                            'order_str': None
                         })
                         
             except json.JSONDecodeError:

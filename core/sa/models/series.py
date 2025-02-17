@@ -10,7 +10,7 @@ class BookSeries(Base, TimestampMixin):
 
     work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
     series_id: Mapped[str] = mapped_column(ForeignKey('series.goodreads_id'), primary_key=True)
-    series_order: Mapped[float | None] = mapped_column(Float, nullable=True)
+    series_order: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     book = relationship('Book', back_populates='book_series')

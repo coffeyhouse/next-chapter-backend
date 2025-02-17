@@ -53,7 +53,7 @@ class AuthorBase(BaseModel):
 class SeriesBase(BaseModel):
     goodreads_id: str
     title: str
-    order: Optional[float] = None
+    order: Optional[str] = None
 
 class GenreBase(BaseModel):
     name: str
