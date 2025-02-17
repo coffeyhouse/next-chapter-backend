@@ -114,21 +114,6 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
                                                  "Failed to get book details", 'red')
                                 continue
 
-                            # Check if this author is listed as 'Author' for this book
-                            is_primary_author = False
-                            author_role = None
-                            for book_author in book_details.get('authors', []):
-                                if book_author.get('goodreads_id') == author.goodreads_id:
-                                    author_role = book_author.get('role', '')
-                                    if author_role.lower() == 'author':
-                                        is_primary_author = True
-                                    break
-
-                            if not is_primary_author:
-                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                                f"Author role is '{author_role or 'Unknown'}' (not primary Author)")
-                                continue
-
                             # Create the book since author is primary
                             book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='author')
                             if book:
