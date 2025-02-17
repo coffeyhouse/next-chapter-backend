@@ -106,13 +106,6 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
                     # Process each book
                     for book_data in books_data['books']:
                         try:
-                            # First get the full book data to check author role
-                            book_details = creator.resolver.resolve_book(book_data['goodreads_id'])
-                            if not book_details:
-                                tracker.add_skipped(book_data['title'], book_data['goodreads_id'],
-                                                 "Failed to get book details", 'red')
-                                continue
-
                             # Create the book since author is primary
                             book = creator.create_book_from_goodreads(book_data['goodreads_id'], source='author')
                             if book:
