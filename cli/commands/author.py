@@ -1,7 +1,6 @@
 import click
 from sqlalchemy.orm import Session
 from core.sa.database import Database
-from core.resolvers.book_creator import BookCreator
 from core.scrapers.author_scraper import AuthorScraper
 from core.scrapers.author_books_scraper import AuthorBooksScraper
 from core.sa.repositories.author import AuthorRepository
@@ -43,7 +42,6 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
     try:
         # Create repositories and services
         author_repo = AuthorRepository(session)
-        creator = BookCreator(session, scrape=scrape)
         author_scraper = AuthorScraper(scrape=scrape)
         books_scraper = AuthorBooksScraper(scrape=scrape)
         
