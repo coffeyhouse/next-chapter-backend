@@ -8,6 +8,7 @@ from PIL import Image
 from io import BytesIO
 from core.exclusions import get_exclusion_reason
 from core.sa.models import Book, BookAuthor, BookGenre
+from core.models.book import HiddenReason
 
 @click.group()
 def book():
@@ -157,12 +158,12 @@ def fix_covers(force: bool, scrape: bool, limit: Optional[int]):
 @click.option('--limit', default=None, type=int, help='Limit number of books to check')
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
 def check_exclusions(limit: Optional[int], verbose: bool):
-    """Check existing books against exclusion rules.
+    """Check existing books against exclusion rules and update their hidden status.
     
     Example:
         cli book check-exclusions  # Check all books
         cli book check-exclusions --limit 100  # Check first 100 books
-        cli book check-exclusions --verbose  # Show detailed progress
+        cli book check-exclusions --verbose  # Show detailed progress of changes
     """
     # Initialize database and session
     db = Database()
@@ -182,6 +183,7 @@ def check_exclusions(limit: Optional[int], verbose: bool):
         books = query.all()
         total_books = len(books)
         excluded_books = []
+        updated_books = []
         
         click.echo(f"\nChecking {total_books} books against exclusion rules...")
         
@@ -199,19 +201,42 @@ def check_exclusions(limit: Optional[int], verbose: bool):
             }
             
             # Check against exclusion rules
-            reason = get_exclusion_reason(book_dict)
-            if reason:
-                excluded_books.append((book, reason))
-                if verbose:
-                    click.echo(f"[{i}/{total_books}] {book.title} - {reason}")
-            elif verbose:
-                click.echo(f"[{i}/{total_books}] {book.title} - OK")
+            exclusion_result = get_exclusion_reason(book_dict)
+            if exclusion_result:
+                # Update the book if needed
+                if not book.hidden or book.hidden_reason != exclusion_result.hidden_reason:
+                    book.hidden = True
+                    book.hidden_reason = exclusion_result.hidden_reason
+                    updated_books.append((book, f"Hidden: {exclusion_result.reason}"))
+                    if verbose:
+                        click.echo(f"[{i}/{total_books}] {book.title} - Now hidden: {exclusion_result.reason}")
+                
+                excluded_books.append((book, exclusion_result.reason))
+            else:
+                # If book was previously hidden due to exclusion rules, unhide it
+                if book.hidden and book.hidden_reason in [
+                    HiddenReason.LOW_VOTE_COUNT,
+                    HiddenReason.NO_DESCRIPTION,
+                    HiddenReason.EXCEEDS_PAGE_LENGTH,
+                    HiddenReason.EXCLUDED_GENRE,
+                    HiddenReason.TITLE_PATTERN_MATCH,
+                    HiddenReason.TITLE_NUMBER_PATTERN
+                ]:
+                    book.hidden = False
+                    book.hidden_reason = None
+                    updated_books.append((book, "Unhidden: no longer meets exclusion criteria"))
+                    if verbose:
+                        click.echo(f"[{i}/{total_books}] {book.title} - Now unhidden (no longer meets exclusion criteria)")
         
-        # Print summary
-        for book, reason in excluded_books:
-            click.echo(f"- {book.title} ({book.work_id})")
-            click.echo(f"  Reason: {reason}")
-        click.echo(f"\nFound {len(excluded_books)} books that match exclusion rules:")
+        # Commit changes
+        if updated_books:
+            session.commit()
+            click.echo(f"\nUpdated {len(updated_books)} books:")
+            for book, change in updated_books:
+                click.echo(f"- {book.title} ({book.work_id})")
+                click.echo(f"  {change}")
+        else:
+            click.echo("\nNo changes needed - all books are correctly marked")
             
     except Exception as e:
         click.echo(f"\nError checking exclusions: {e}", err=True)

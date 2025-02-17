@@ -23,7 +23,7 @@ class BookCreator:
             source: Source of the book (default: 'goodreads')
             
         Returns:
-            Created Book object or None if book already exists, was previously scraped, or is excluded
+            Created Book object or None if book already exists or was previously scraped
         """
                 
         # Check if book has been scraped before
@@ -44,16 +44,25 @@ class BookCreator:
             return None
 
         # Check exclusions before proceeding
-        exclusion_reason = get_exclusion_reason(book_data)
-        if exclusion_reason:
-            # Still track that we attempted to scrape this book
+        exclusion_result = get_exclusion_reason(book_data)
+        if exclusion_result:
+            # Set the book as hidden with the reason
+            book_data['hidden'] = True
+            book_data['hidden_reason'] = exclusion_result.hidden_reason
+            book_data['source'] = source
+
+            # Create the book even though it's excluded
+            book = self.create_book(book_data)
+
+            # Track that we scraped this book
             scraped = BookScraped(
                 goodreads_id=goodreads_id,
                 work_id=book_data.get('work_id')
             )
             self.session.add(scraped)
             self.session.commit()
-            return None
+            
+            return book
 
         # Track successful scrape
         scraped = BookScraped(
@@ -125,6 +134,7 @@ class BookCreator:
             image_url=book_data.get('image_url'),
             source=book_data.get('source', 'goodreads'),
             hidden=book_data.get('hidden', False),
+            hidden_reason=book_data.get('hidden_reason'),
             last_synced_at=now
         )
 
