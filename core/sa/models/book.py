@@ -58,7 +58,10 @@ class Book(Base, TimestampMixin, LastSyncedMixin):
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    hidden_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     similar_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scraping_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    next_scrape_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     book_authors = relationship('BookAuthor', back_populates='book')

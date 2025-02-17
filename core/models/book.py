@@ -15,6 +15,30 @@ class PublishedState(str, Enum):
     PUBLISHED = "published"
     UPCOMING = "upcoming"
 
+class HiddenReason(str, Enum):
+    # Vote/Data Quality
+    LOW_VOTE_COUNT = "low_vote_count"           # Too few votes to be reliable
+    NO_DESCRIPTION = "no_description"           # Missing book description
+    EXCEEDS_PAGE_LENGTH = "exceeds_page_length" # Page count too high
+    PAGE_COUNT_UNKNOWN = "page_count_unknown"   # Missing page count
+
+    # Language
+    NO_ENGLISH_EDITIONS = "no_english_editions" # No English editions found
+
+    # Excluded Format/Genre
+    EXCLUDED_GENRE = "excluded_genre"           # Book in an excluded genre (manga, etc)
+    INVALID_FORMAT = "invalid_format"           # Invalid book format
+
+    # Title Issues
+    TITLE_PATTERN_MATCH = "title_pattern_match"     # Title contains excluded pattern
+    TITLE_NUMBER_PATTERN = "title_number_pattern"   # Title contains number pattern
+
+    # Publication Info
+    INVALID_PUBLICATION = "invalid_publication" # Invalid or missing publication info
+    
+    # Manually hidden by user
+    MANUAL = "manual"        # Manually hidden by user
+
 class AuthorRole(str, Enum):
     AUTHOR = "Author"
     TRANSLATOR = "Translator"
