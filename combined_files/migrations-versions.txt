@@ -55,6 +55,54 @@ def downgrade() -> None:
 
 
 
+# migrations\versions\add_book_scraping_columns.py
+
+"""add book scraping columns
+
+Revision ID: 2024_03_19_add_book_scraping_columns
+Revises: remove_book_columns
+Create Date: 2024-03-19 10:00:00.000000
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+from alembic import context
+
+
+# revision identifiers, used by Alembic.
+revision: str = '2024_03_19_add_book_scraping_columns'
+down_revision: Union[str, None] = 'remove_book_columns'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    # Add all columns first
+    op.add_column('book', sa.Column('scraping_priority', sa.Integer(), nullable=True))
+    op.add_column('book', sa.Column('next_scrape_at', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('book', sa.Column('hidden_reason', sa.String(), nullable=True))
+
+    # Add check constraint in a separate batch operation
+    with op.batch_alter_table('book') as batch_op:
+        batch_op.create_check_constraint(
+            'ck_book_scraping_priority_range',
+            'scraping_priority >= 1 AND scraping_priority <= 5'
+        )
+
+
+def downgrade() -> None:
+    # Remove constraint first
+    with op.batch_alter_table('book') as batch_op:
+        batch_op.drop_constraint('ck_book_scraping_priority_range', type_='check')
+    
+    # Remove columns
+    op.drop_column('book', 'hidden_reason')
+    op.drop_column('book', 'next_scrape_at')
+    op.drop_column('book', 'scraping_priority') 
+
+
 # migrations\versions\aeb280782a0d_add_bookwanted_table.py
 
 """Add BookWanted table
@@ -105,4 +153,133 @@ def downgrade() -> None:
     # Drop book_wanted table
     op.drop_table('book_wanted')
 
+
+
+# migrations\versions\change_series_order_to_text.py
+
+"""Change series_order to text
+
+Revision ID: change_series_order_to_text
+Revises: remove_book_columns
+Create Date: 2024-03-21
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'change_series_order_to_text'
+down_revision: Union[str, None] = 'remove_book_columns'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    # Create a temporary table with the new schema
+    op.execute("""
+        CREATE TABLE book_series_new (
+            work_id TEXT,
+            series_id TEXT,
+            series_order TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (work_id, series_id),
+            FOREIGN KEY (work_id) REFERENCES book(work_id),
+            FOREIGN KEY (series_id) REFERENCES series(goodreads_id)
+        )
+    """)
+    
+    # Copy data from old table to new table, converting series_order to text
+    op.execute("""
+        INSERT INTO book_series_new 
+        SELECT work_id, series_id, 
+               CASE 
+                   WHEN series_order IS NULL THEN NULL 
+                   ELSE CAST(series_order AS TEXT) 
+               END,
+               created_at, updated_at
+        FROM book_series
+    """)
+    
+    # Drop old table
+    op.execute("DROP TABLE book_series")
+    
+    # Rename new table to original name
+    op.execute("ALTER TABLE book_series_new RENAME TO book_series")
+
+
+def downgrade() -> None:
+    # Create a temporary table with the old schema
+    op.execute("""
+        CREATE TABLE book_series_old (
+            work_id TEXT,
+            series_id TEXT,
+            series_order REAL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (work_id, series_id),
+            FOREIGN KEY (work_id) REFERENCES book(work_id),
+            FOREIGN KEY (series_id) REFERENCES series(goodreads_id)
+        )
+    """)
+    
+    # Copy data from current table to old table, attempting to convert text back to real
+    op.execute("""
+        INSERT INTO book_series_old 
+        SELECT work_id, series_id,
+               CASE 
+                   WHEN series_order IS NULL THEN NULL
+                   WHEN CAST(series_order AS REAL) IS NULL THEN NULL
+                   ELSE CAST(series_order AS REAL)
+               END,
+               created_at, updated_at
+        FROM book_series
+    """)
+    
+    # Drop new table
+    op.execute("DROP TABLE book_series")
+    
+    # Rename old table to original name
+    op.execute("ALTER TABLE book_series_old RENAME TO book_series") 
+
+
+# migrations\versions\remove_book_columns.py
+
+"""Remove language, isbn, and calibre_id columns from book table
+
+Revision ID: remove_book_columns
+Revises: a33b00fc340b
+Create Date: 2024-02-16
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'remove_book_columns'
+down_revision: Union[str, None] = 'a33b00fc340b'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    # Drop the columns from the book table
+    with op.batch_alter_table('book') as batch_op:
+        batch_op.drop_column('language')
+        batch_op.drop_column('isbn')
+        batch_op.drop_column('calibre_id')
+
+
+def downgrade() -> None:
+    # Add the columns back to the book table
+    with op.batch_alter_table('book') as batch_op:
+        batch_op.add_column(sa.Column('language', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('isbn', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('calibre_id', sa.Integer(), nullable=True)) 
 

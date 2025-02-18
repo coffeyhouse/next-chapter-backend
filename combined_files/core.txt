@@ -1,5 +1,6 @@
 # core/exclusions.py
-from typing import Optional
+from typing import Optional, Tuple, NamedTuple
+from core.sa.models.book import HiddenReason
 import re
 
 EXCLUSION_RULES = {
@@ -22,12 +23,24 @@ EXCLUSION_RULES = {
         "Collection Set",
         "Book Set",
         "free preview",
-        "other stories"
+        "other stories",
+        "Summary & Analysis",
+        "Music from the Motion Picture",
+        "Illustrated Movie Companion",        
+        "Illustrated guide",
+        "Review Summary",
+        "collection: ",
+        "unofficial guide",
+        "Unauthorized guide"
     ],     
-    "max_pages": 1800,                     # Exclude books with more than 1800 pages
+    "max_pages": 1600,                     # Exclude books with more than 1600 pages
 }
 
-def get_exclusion_reason(book: dict) -> Optional[str]:
+class ExclusionResult(NamedTuple):
+    reason: str
+    hidden_reason: HiddenReason
+
+def get_exclusion_reason(book: dict) -> Optional[ExclusionResult]:
     # Check title patterns first
     if "title" in book and book["title"]:
         title_lower = book["title"].lower()
@@ -35,7 +48,10 @@ def get_exclusion_reason(book: dict) -> Optional[str]:
         # Check for basic patterns
         for pattern in EXCLUSION_RULES.get("title_patterns", []):
             if pattern.lower() in title_lower:
-                return f"title contains disallowed pattern '{pattern}'"
+                return ExclusionResult(
+                    reason=f"title contains disallowed pattern '{pattern}'",
+                    hidden_reason=HiddenReason.TITLE_PATTERN_MATCH
+                )
         
         # Check for various number patterns in titles
         number_patterns = [
@@ -51,12 +67,25 @@ def get_exclusion_reason(book: dict) -> Optional[str]:
             r'\d+ books hardcover collection',  # "3 Books Hardcover Collection"
             r'series.*collection set',      # "Series Collection Set"
             r'.*\d+\s*books.*collection',   # Any title with "X books" and "collection"
-            r'.*series.*set of.*books'      # Any series with "set of X books"
+            r'.*series.*set of.*books',      # Any series with "set of X books"
+            r'chapters?\s*\d+\s*-\s*\d+',    # "Chapters 1-5", "Chapter 1 - 5"
+            r'(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+book\s+collection',  # "Four Book Collection", "3 Book Collection"
+            r'books?\s+[IVXivx]+\s*-\s*[IVXivx]+',  # "Books I-III", "Book I - V"
+            r'vol\.?\s*\d+\s*-\s*\d+',     # "Vol. 1-4", "Vols 1-4"
+            r'vols?\.?\s*\d+\s*-\s*\d+',   # "Vol. 1-4", "Vols 1-4"
+            r'collection\s+\d+\s*-\s*\d+',  # "Collection 1-4"
+            r'thrillers\s+\d+\s*-\s*\d+',   # "Thrillers 4-6"
+            r'\d+\s*-\s*book\s+collection', # "2-Book Collection"
+            r'series\s+\d+\s*-\s*book',     # "Series 2-Book"
+            r'(?:collection|series|thrillers|books)\s+\d+\s*-\s*\d+:' # "Collection 1-4:", "Series 1-4:", etc. with colon
         ]
         
         for pattern in number_patterns:
             if re.search(pattern, title_lower):
-                return f"title contains number pattern indicating multiple books"
+                return ExclusionResult(
+                    reason=f"title contains number pattern indicating multiple books",
+                    hidden_reason=HiddenReason.TITLE_NUMBER_PATTERN
+                )
 
     # Check if book is upcoming
     is_upcoming = book.get("published_state") == "upcoming"
@@ -69,7 +98,10 @@ def get_exclusion_reason(book: dict) -> Optional[str]:
             try:
                 pages = int(book["pages"])
                 if pages > max_pages:
-                    return f"page count ({pages}) exceeds maximum limit of {max_pages}"
+                    return ExclusionResult(
+                        reason=f"page count ({pages}) exceeds maximum limit of {max_pages}",
+                        hidden_reason=HiddenReason.EXCEEDS_PAGE_LENGTH
+                    )
             except (ValueError, TypeError):
                 pass
 
@@ -79,20 +111,32 @@ def get_exclusion_reason(book: dict) -> Optional[str]:
             try:
                 votes = int(book["goodreads_votes"])
                 if votes < min_votes:
-                    return f"votes ({votes}) are below the minimum threshold of {min_votes}."
+                    return ExclusionResult(
+                        reason=f"votes ({votes}) are below the minimum threshold of {min_votes}.",
+                        hidden_reason=HiddenReason.LOW_VOTE_COUNT
+                    )
             except (ValueError, TypeError):
-                return "votes could not be determined."
+                return ExclusionResult(
+                    reason="votes could not be determined.",
+                    hidden_reason=HiddenReason.LOW_VOTE_COUNT
+                )
 
         # Check description
         if EXCLUSION_RULES.get("require_description", False):
             if not book.get("description"):
-                return "description is missing."
+                return ExclusionResult(
+                    reason="description is missing.",
+                    hidden_reason=HiddenReason.NO_DESCRIPTION
+                )
 
     # Check genres (always check genres regardless of upcoming status)
     if "genres" in book and book["genres"]:
         for genre in book["genres"]:
             if genre.get("name") in EXCLUSION_RULES.get("genres", []):
-                return f"genre '{genre.get('name')}' is disallowed."
+                return ExclusionResult(
+                    reason=f"genre '{genre.get('name')}' is disallowed.",
+                    hidden_reason=HiddenReason.EXCLUDED_GENRE
+                )
 
     return None
 

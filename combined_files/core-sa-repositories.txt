@@ -74,7 +74,8 @@ class AuthorRepository:
                     .filter(
                         Book.goodreads_votes.isnot(None),
                         Book.published_date >= '2000-01-01',  # Only books published after 2000
-                        Book.published_date.isnot(None)  # Ensure we have a publication date
+                        Book.published_date.isnot(None),  # Ensure we have a publication date
+                        BookAuthor.role == 'Author'  # Only consider primary authors
                     )
                     .group_by(Author.goodreads_id)
                     .having(func.max(Book.goodreads_votes) >= 10000)  # Minimum vote threshold
@@ -358,8 +359,31 @@ class BookRepository:
         # Filter for books that haven't been synced for similar books
         query = query.filter(Book.similar_synced_at.is_(None))
         
-        # Order by rating desc so we process popular books first
-        return query.order_by(desc(Book.goodreads_rating)).all()
+        # Only include published books with ratings and votes
+        query = query.filter(
+            Book.source.isnot(None),  # Source must not be None
+            or_(
+                Book.published_state == "published",
+                Book.published_state.is_(None)  # Allow None published_state
+            ),
+            Book.published_date >= '2000-01-01',  # Only books published after 2000
+            Book.published_date.isnot(None),  # Ensure we have a publication date
+            Book.goodreads_rating.isnot(None),  # Must have a rating
+            Book.goodreads_votes.isnot(None)  # Must have votes
+        )
+        
+        # Order by rating and votes desc so we process popular books first
+        books = query.order_by(
+            Book.goodreads_votes.desc().nulls_last(),
+            Book.goodreads_rating.desc().nulls_last()
+        ).all()
+
+        # Debug log the order
+        print("\nBooks to process for similar books:")
+        for book in books[:10]:  # Show first 10 for debugging
+            print(f"- {book.title}: rating={book.goodreads_rating}, votes={book.goodreads_votes}, published={book.published_date}")
+            
+        return books
 
     def get_series_with_counts(
         self,

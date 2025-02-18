@@ -27,14 +27,16 @@
 |   |-- __init__.py
 |   |-- author.py
 |   |-- book.py
-|   |-- chain.py
 |   |-- dev.py
-|   |-- genre.py
 |   |-- library.py
+|   |-- list.py
+|   |-- monitor.py
+|   |-- read.py
 |   |-- scraper.py
 |   |-- series.py
 |   |-- similar.py
 |-- __init__.py
+|-- __main__.py
 |-- main.py
 |-- utils.py
 +-- combined_files/
@@ -44,29 +46,23 @@
 |-- calibre_companion.egg-info.txt
 |-- cli-commands.txt
 |-- cli.txt
-|-- core-database.txt
 |-- core-models.txt
 |-- core-resolvers.txt
 |-- core-sa-models.txt
 |-- core-sa-repositories.txt
 |-- core-sa.txt
 |-- core-scrapers.txt
-|-- core-services.txt
 |-- core-utils-proxy.txt
 |-- core-utils.txt
 |-- core.txt
 |-- migrations-versions.txt
 |-- migrations.txt
+|-- tests-fixtures.txt
 |-- tests-test_sa-test_repositories.txt
 |-- tests-test_sa-test_resolvers.txt
 |-- tests-test_sa.txt
+|-- tests-test_scrapers.txt
 +-- core/
-|   +-- database/
-|   |-- __init__.py
-|   |-- base.py
-|   |-- goodreads.py
-|   |-- queries.py
-|   |-- schema.py
 |   +-- models/
 |   |-- __init__.py
 |   |-- book.py
@@ -97,15 +93,12 @@
 |   |-- __init__.py [empty]
 |   |-- author_books_scraper.py
 |   |-- author_scraper.py
+|   |-- base_scraper.py
 |   |-- book_scraper.py
 |   |-- editions_scraper.py
+|   |-- list_scraper.py
 |   |-- series_scraper.py
 |   |-- similar_scraper.py
-|   +-- services/
-|   |-- __init__.py [empty]
-|   |-- author_service.py [empty]
-|   |-- book_service.py
-|   |-- series_service.py [empty]
 |   +-- utils/
 |   |   +-- proxy/
 |   |   |-- proxy_manager.py
@@ -114,8 +107,10 @@
 |   |   |-- urls.txt
 |   |   |-- working_proxies.txt
 |   |-- __init__.py [empty]
+|   |-- book_sync_helper.py
 |   |-- http.py
 |   |-- image.py
+|   |-- progress_utils.py
 |   |-- rate_limit.py
 |-- __init__.py
 |-- exclusions.py
@@ -127,6 +122,9 @@
 |   |   +-- book/
 |   |   |   +-- show/
 |   |   |   +-- similar/
+|   |   +-- list/
+|   |   |   +-- show/
+|   |   |   |   +-- 168061/
 |   |   +-- series/
 |   |   |   +-- show/
 |   |   +-- work/
@@ -134,15 +132,20 @@
 |   +-- db/
 |   +-- images/
 |   |   +-- author/
-|   |   +-- book/
 +-- migrations/
 |   +-- versions/
 |   |-- a33b00fc340b_add_user_subscription_tables.py
+|   |-- add_book_scraping_columns.py
 |   |-- aeb280782a0d_add_bookwanted_table.py
+|   |-- change_series_order_to_text.py
+|   |-- remove_book_columns.py
 |-- README
 |-- env.py
 |-- script.py.mako
 +-- tests/
+|   +-- fixtures/
+|   |-- book_13496.json
+|   |-- book_show.html
 |   +-- test_sa/
 |   |   +-- test_repositories/
 |   |   |-- test_author_repository.py
@@ -161,3 +164,5 @@
 |   |-- test_models.py
 |   |-- test_schema.py
 |   |-- utils.py
+|   +-- test_scrapers/
+|   |-- test_base_scraper.py

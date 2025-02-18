@@ -291,6 +291,480 @@ class AuthorScraper:
         return None
 
 
+# core\scrapers\base_scraper.py
+
+from bs4 import BeautifulSoup
+from pathlib import Path
+import logging
+from typing import Optional, Union
+import click
+from abc import ABC, abstractmethod
+from ..utils.http import GoodreadsDownloader
+import time
+import json
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
+
+class BaseScraper(ABC):
+    """Base class for all scrapers providing common functionality."""
+    
+    def __init__(self, scrape: bool = False, cache_dir: Union[str, Path] = 'data/cache', cache_max_age: int = 3600):
+        """
+        Initialize the base scraper.
+        
+        Args:
+            scrape: Whether to allow live scraping or use only cached data
+            cache_dir: Base directory for caching scraped data
+            cache_max_age: Maximum age in seconds for cache files to be considered fresh
+        """
+        self.downloader = GoodreadsDownloader(scrape)
+        self.cache_dir = Path(cache_dir)
+        self.cache_max_age = cache_max_age  # seconds
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._setup_logging()
+
+    def _setup_logging(self):
+        """Set up logging for the scraper."""
+        self.logger = logging.getLogger(self.__class__.__name__)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+
+    def build_url(self, base: str, params: dict) -> str:
+        """
+        Construct a URL with query parameters.
+        
+        Args:
+            base: The base URL.
+            params: Dictionary of query parameters.
+            
+        Returns:
+            The constructed URL as a string.
+        """
+        return f"{base}?{urlencode(params)}"
+
+    def get_cache_path(self, identifier: str, subdir: str = '', suffix: str = '.html') -> Path:
+        """
+        Get the cache file path for an identifier.
+        
+        Args:
+            identifier: Unique identifier for the item.
+            subdir: Optional subdirectory within cache.
+            suffix: File suffix to use.
+            
+        Returns:
+            Path: The constructed cache path.
+        """
+        path = self.cache_dir
+        if subdir:
+            path = path / subdir
+        return path / f"{identifier}{suffix}"
+
+    def read_cache(self, cache_path: Union[str, Path]) -> Optional[str]:
+        """
+        Read HTML content from cache.
+        
+        Args:
+            cache_path: Path to the cached file.
+            
+        Returns:
+            The cached HTML content as a string, or None if not found/error.
+        """
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            self.logger.warning(f"Cache file not found: {cache_path}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error reading cache {cache_path}: {e}")
+            return None
+
+    def write_cache(self, cache_path: Union[str, Path], content: str) -> bool:
+        """
+        Write content to cache.
+        
+        Args:
+            cache_path: Path where to write the cache file.
+            content: The content to cache.
+            
+        Returns:
+            True if write was successful, False otherwise.
+        """
+        try:
+            cache_path = Path(cache_path)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error writing cache {cache_path}: {e}")
+            return False
+
+    def is_cache_fresh(self, cache_path: Union[str, Path]) -> bool:
+        """
+        Check if a cache file is fresh based on its modification time.
+        
+        Args:
+            cache_path: Path to the cached file.
+            
+        Returns:
+            True if the cache file exists and is not older than self.cache_max_age.
+        """
+        cache_path = Path(cache_path)
+        if not cache_path.exists():
+            return False
+        file_mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
+        if datetime.now() - file_mtime < timedelta(seconds=self.cache_max_age):
+            return True
+        return False
+
+    def download_url(self, url: str, identifier: str, retries: int = 3) -> bool:
+        """
+        Download a URL and cache the response using an exponential backoff strategy.
+        
+        Args:
+            url: The URL to download.
+            identifier: Unique identifier for caching.
+            retries: Number of download attempts before giving up.
+            
+        Returns:
+            True if download was successful, False otherwise.
+        """
+        if click.get_current_context().find_root().params.get('verbose', False):
+            click.echo(click.style(f"Downloading: {url}", fg='cyan'))
+            
+        attempt = 0
+        delay = 1  # initial delay in seconds
+        while attempt < retries:
+            try:
+                success = self.downloader.download_url(url)
+                if success:
+                    return True
+                attempt += 1
+                self.logger.warning(f"Download attempt {attempt} failed for {url}. Retrying in {delay} seconds.")
+                time.sleep(delay)
+                delay *= 2  # exponential backoff
+            except Exception as e:
+                self.logger.error(f"Error downloading {url}: {e}")
+                attempt += 1
+                time.sleep(delay)
+                delay *= 2
+        
+        self.logger.error(f"Failed to download {url} after {retries} attempts")
+        return False
+
+    def parse_html(self, html: str) -> Optional[BeautifulSoup]:
+        """
+        Parse HTML content into a BeautifulSoup object.
+        
+        Args:
+            html: The HTML content to parse.
+            
+        Returns:
+            A BeautifulSoup object if parsing is successful, otherwise None.
+        """
+        if not html:
+            return None
+        try:
+            return BeautifulSoup(html, 'html.parser')
+        except Exception as e:
+            self.logger.error(f"Error parsing HTML: {e}")
+            return None
+
+    def clean_html(self, html: str) -> str:
+        """
+        Clean HTML content before parsing.
+        Can be overridden by derived classes for specific cleaning needs.
+        
+        Args:
+            html: The HTML content to clean.
+            
+        Returns:
+            The cleaned HTML as a string.
+        """
+        # Add any common cleaning steps here (e.g., remove unwanted tags)
+        return html.strip()
+
+    def extract_json(self, element: Optional[BeautifulSoup], default: Optional[dict] = None) -> dict:
+        """
+        Safely extract and parse JSON data from a BeautifulSoup element.
+        
+        Args:
+            element: The BeautifulSoup element containing JSON.
+            default: Default value to return if extraction fails.
+            
+        Returns:
+            Parsed JSON as a dictionary.
+        """
+        if element is None:
+            return default or {}
+        try:
+            return json.loads(element.string)
+        except Exception as e:
+            self.logger.error(f"Error extracting JSON: {e}")
+            return default or {}
+
+    @abstractmethod
+    def get_url(self, identifier: str) -> str:
+        """
+        Get the URL for an identifier.
+        Must be implemented by derived classes.
+        
+        Args:
+            identifier: The identifier to get the URL for.
+            
+        Returns:
+            The constructed URL as a string.
+        """
+        pass
+
+    @abstractmethod
+    def extract_data(self, soup: BeautifulSoup, identifier: str) -> dict:
+        """
+        Extract data from parsed HTML.
+        Must be implemented by derived classes.
+        
+        Args:
+            soup: The parsed HTML.
+            identifier: The identifier being scraped.
+            
+        Returns:
+            A dictionary containing the extracted data.
+        """
+        pass
+
+    def scrape(self, identifier: str) -> Optional[dict]:
+        """
+        Main scraping method that coordinates the scraping process.
+        
+        Args:
+            identifier: The identifier of the item to scrape.
+            
+        Returns:
+            A dictionary with the scraped data, or None if scraping failed.
+        """
+        url = self.get_url(identifier)
+        cache_path = self.get_cache_path(identifier)
+        
+        # Use cache if it exists and is fresh
+        if self.is_cache_fresh(cache_path):
+            self.logger.info(f"Using fresh cache for {identifier}")
+        else:
+            # If cache is stale or missing, download and write to cache
+            if not self.download_url(url, identifier):
+                self.logger.error(f"Failed to download {url}")
+                return None
+        
+        html = self.read_cache(cache_path)
+        if not html:
+            self.logger.error(f"Failed to read cache for {identifier}")
+            return None
+        
+        html = self.clean_html(html)
+        soup = self.parse_html(html)
+        if not soup:
+            self.logger.error(f"Failed to parse HTML for {identifier}")
+            return None
+        
+        try:
+            return self.extract_data(soup, identifier)
+        except Exception as e:
+            self.logger.error(f"Error extracting data for {identifier}: {e}")
+            return None
+
+    def scrape_paginated(self, identifier: str, max_pages: int = None) -> Optional[dict]:
+        """
+        Scrape data from paginated content.
+        
+        Args:
+            identifier: The identifier of the item to scrape
+            max_pages: Maximum number of pages to scrape (None for all pages)
+            
+        Returns:
+            Dictionary containing the combined data from all pages, or None if scraping failed
+        """
+        all_items = []
+        current_page = 1
+        metadata = {}  # Store any additional data from first page
+        
+        while True:
+            # Check page limit
+            if max_pages and current_page > max_pages:
+                break
+                
+            # Get URL for current page
+            url = self.get_page_url(identifier, current_page)
+            cache_path = self.get_cache_path(
+                f"{identifier}_page_{current_page}", 
+                suffix=f"_{urlencode(self.get_pagination_params(current_page))}.html"
+            )
+            
+            # Use cache if fresh, otherwise download
+            if not self.is_cache_fresh(cache_path):
+                if not self.download_url(url, identifier):
+                    if all_items:  # Return what we have if not first page
+                        break
+                    self.logger.error(f"Failed to download page {current_page}")
+                    return None
+            
+            # Read and parse page
+            html = self.read_cache(cache_path)
+            if not html:
+                if all_items:
+                    break
+                return None
+                
+            html = self.clean_html(html)
+            soup = self.parse_html(html)
+            if not soup:
+                if all_items:
+                    break
+                return None
+            
+            try:
+                # Extract items from current page
+                page_data = self.extract_page_data(soup, identifier)
+                if not page_data:
+                    break
+                    
+                # Store metadata from first page
+                if current_page == 1:
+                    metadata = self.extract_metadata(soup, identifier)
+                
+                # Add items from this page
+                all_items.extend(page_data)
+                
+                # Check pagination
+                pagination = self.extract_pagination(soup)
+                if not pagination or current_page >= pagination.get('total_pages', current_page):
+                    break
+                    
+                current_page += 1
+                
+            except Exception as e:
+                self.logger.error(f"Error processing page {current_page}: {e}")
+                if all_items:
+                    break
+                return None
+        
+        # Combine items with metadata
+        return {
+            'items': all_items,
+            **metadata
+        }
+
+    @abstractmethod
+    def get_page_url(self, identifier: str, page: int) -> str:
+        """
+        Get URL for a specific page.
+        Must be implemented by derived classes.
+        
+        Args:
+            identifier: The identifier being scraped
+            page: The page number
+            
+        Returns:
+            The URL for the specified page
+        """
+        pass
+
+    def get_pagination_params(self, page: int) -> dict:
+        """
+        Get pagination parameters for URL.
+        Can be overridden by derived classes.
+        
+        Args:
+            page: The page number
+            
+        Returns:
+            Dictionary of pagination parameters
+        """
+        return {
+            'page': page
+        }
+
+    @abstractmethod
+    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> list:
+        """
+        Extract items from a single page.
+        Must be implemented by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            identifier: The identifier being scraped
+            
+        Returns:
+            List of items from the page
+        """
+        pass
+
+    def extract_metadata(self, soup: BeautifulSoup, identifier: str) -> dict:
+        """
+        Extract metadata from first page.
+        Can be overridden by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            identifier: The identifier being scraped
+            
+        Returns:
+            Dictionary of metadata
+        """
+        return {}
+
+    def extract_pagination(self, soup: BeautifulSoup) -> Optional[dict]:
+        """
+        Extract pagination information.
+        Can be overridden by derived classes.
+        
+        Args:
+            soup: The parsed HTML
+            
+        Returns:
+            Dictionary with pagination info (e.g., {'current_page': 1, 'total_pages': 10})
+        """
+        # Default implementation looks for common pagination patterns
+        try:
+            pagination = {'current_page': 1, 'total_pages': 1}
+            
+            # Find pagination container
+            paginator = soup.find('div', class_=['pagination', 'paginator'])
+            if not paginator:
+                paginator = soup.find('div', style='float: right')  # Goodreads style
+            
+            if paginator:
+                # Get current page
+                current = paginator.find(['em', 'span'], class_='current')
+                if current:
+                    try:
+                        pagination['current_page'] = int(current.text.strip())
+                    except ValueError:
+                        pass
+                
+                # Get max page from links
+                max_page = 1
+                for link in paginator.find_all('a'):
+                    try:
+                        page_num = int(link.text.strip())
+                        max_page = max(max_page, page_num)
+                    except ValueError:
+                        continue
+                
+                pagination['total_pages'] = max_page
+            
+            return pagination
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting pagination: {e}")
+            return None
+
+
 # core/scrapers/book_scraper.py
 from bs4 import BeautifulSoup
 from pathlib import Path
@@ -307,7 +781,7 @@ class BookScraper:
     def __init__(self, scrape: bool = False):
         self.downloader = GoodreadsDownloader(scrape)
         
-    def scrape_book(self, book_id: str) -> dict:
+    def scrape(self, book_id: str) -> dict:
         """
         Get book data from Goodreads book page
         Expected output:
@@ -365,21 +839,22 @@ class BookScraper:
         try:
             soup = BeautifulSoup(html, 'html.parser')
             book_data = {
-            'goodreads_id': book_id,
-            'title': self._extract_title(soup),
-            'work_id': self._extract_work_id(soup),
-            'description': self._extract_description(soup),
-            'language': None,
-            'pages': None,
-            'isbn': None,
-            'goodreads_rating': None,
-            'goodreads_votes': None,
-            'published_date': None,
-            'published_state': None,
-            'image_url': None,
-            'source': 'scrape',
-            'hidden': False
-        }
+                'goodreads_id': book_id,
+                'title': self._extract_title(soup),
+                'work_id': self._extract_work_id(soup),
+                'description': self._extract_description(soup),
+                'language': None,
+                'pages': None,
+                'isbn': None,
+                'goodreads_rating': None,
+                'goodreads_votes': None,
+                'published_date': None,
+                'published_state': None,
+                'image_url': None,
+                'source': 'scrape',
+                'hidden': False,
+                'format': None
+            }
             
             # Extract book details
             details = self._extract_book_details(soup)
@@ -388,7 +863,8 @@ class BookScraper:
                 'pages': details.get('pages'),
                 'isbn': details.get('isbn'),
                 'goodreads_rating': details.get('rating'),
-                'goodreads_votes': details.get('rating_count')
+                'goodreads_votes': details.get('rating_count'),
+                'format': details.get('format')
             })
             
             # Get publication date
@@ -573,10 +1049,8 @@ class BookScraper:
                     order = None
                     if '#' in text:
                         name, number = text.split('#')
-                        try:
-                            order = float(number.strip())
-                        except ValueError:
-                            pass
+                        number = number.strip()
+                        order = number
                     
                     series.append({
                         'goodreads_id': main_series_id,
@@ -606,7 +1080,8 @@ class BookScraper:
                         series.append({
                             'goodreads_id': series_id,
                             'name': value.get('title', ''),
-                            'order': None  # Additional series typically don't have order
+                            'order': None,  # Additional series typically don't have order
+                            'order_str': None
                         })
                         
             except json.JSONDecodeError:
@@ -713,6 +1188,10 @@ class EditionsScraper:
     
     def __init__(self, scrape: bool = False):
         self.downloader = GoodreadsDownloader(scrape)
+        self.has_english_editions = False
+        self.has_valid_format = False
+        self.has_page_count = False
+        self.has_valid_publication = False
     
     def scrape_editions(self, work_id: str) -> list[dict]:
         """
@@ -731,6 +1210,11 @@ class EditionsScraper:
             }
         ]
         """
+        # Reset all flags
+        self.has_english_editions = False
+        self.has_valid_format = False
+        self.has_page_count = False
+        self.has_valid_publication = False
         
         # Get first page content
         url = self._get_page_url(work_id, 1)
@@ -810,10 +1294,16 @@ class EditionsScraper:
                     format_match = re.search(r'(Paperback|Hardcover|Kindle Edition|ebook|Mass Market Paperback)', text, re.IGNORECASE)
                     if format_match:
                         edition['format'] = format_match.group(1)
+                        # Track if we've found a valid format
+                        if edition['format'] in valid_formats:
+                            self.has_valid_format = True
                     
                     pages_match = re.search(r'(\d+)\s*pages?', text)
                     if pages_match:
                         edition['pages'] = int(pages_match.group(1))
+                        # Track if we've found any page counts
+                        if edition['pages'] > 0:
+                            self.has_page_count = True
                 
                 # Get published date
                 pub_div = details.find('div', text=re.compile(r'Published|Expected publication'))
@@ -826,11 +1316,16 @@ class EditionsScraper:
                         # Only set if it looks like a real date (not just "by Publisher")
                         if not date_text.startswith('by '):
                             edition['published_date'] = date_text
+                            # Track if we've found any valid publication dates
+                            self.has_valid_publication = True
                 
                 # Get language
                 language_div = details.find('div', text=lambda x: x and 'Edition language:' in x)
                 if language_div and language_div.find_next('div', class_='dataValue'):
                     edition['language'] = language_div.find_next('div', class_='dataValue').text.strip()
+                    # Track if we've found any English editions
+                    if edition['language'] == 'English':
+                        self.has_english_editions = True
                 
                 # Get rating and rating count
                 rating_div = details.find('div', text=lambda x: x and 'Average rating:' in x)
@@ -858,6 +1353,222 @@ class EditionsScraper:
                 editions.append(edition)
         
         return editions
+
+
+# core\scrapers\list_scraper.py
+
+from bs4 import BeautifulSoup
+from pathlib import Path
+import re
+from .base_scraper import BaseScraper
+
+class ListScraper(BaseScraper):
+    """Scrapes books from a Goodreads list page"""
+    
+    def __init__(self, scrape: bool = False):
+        super().__init__(scrape, cache_dir='data/cache/list/show')
+    
+    def get_url(self, identifier: str) -> str:
+        """Get URL for list page (required by BaseScraper)"""
+        return self.get_page_url(identifier, 1)
+    
+    def get_cache_path(self, identifier: str, subdir: str = '', suffix: str = '.html') -> Path:
+        """Override cache path to handle first page differently"""
+        path = self.cache_dir
+        if subdir:
+            path = path / subdir
+            
+        # First page doesn't have page parameter in URL
+        if identifier.endswith('_page_1'):
+            base_id = identifier.replace('_page_1', '')
+            return path / f"{base_id}.html"
+            
+        # For other pages, include the page parameter
+        if '_page_' in identifier:
+            base_id, page = identifier.split('_page_')
+            return self.cache_dir / f"{base_id}page={page}.html"
+            
+        return path / f"{identifier}{suffix}"
+    
+    def extract_data(self, soup: BeautifulSoup, identifier: str) -> dict:
+        """Extract data from a single page (required by BaseScraper)"""
+        return {
+            'items': self.extract_page_data(soup, identifier)
+        }
+    
+    def scrape_list(self, list_id: str, max_pages: int = 1) -> list[dict]:
+        """
+        Get books from a list page
+        Args:
+            list_id: The Goodreads list ID
+            max_pages: Maximum number of pages to scrape (default: 1)
+        
+        Returns list of books with format:
+        [
+            {
+                'goodreads_id': str,
+                'title': str,
+                'author': {
+                    'goodreads_id': str,
+                    'name': str
+                },
+                'rating': float,
+                'rating_count': int,
+                'score': int,
+                'votes': int
+            }
+        ]
+        """
+        self.logger.info(f"Scraping list: {list_id}")
+        
+        # Use base class pagination
+        result = self.scrape_paginated(list_id, max_pages)
+        if not result:
+            self.logger.warning(f"No results found for list: {list_id}")
+            return []
+            
+        if not result.get('items'):
+            self.logger.warning(f"No books found in list: {list_id}")
+            return []
+            
+        self.logger.info(f"Found {len(result['items'])} books in list")
+        return result['items']
+    
+    def get_page_url(self, list_id: str, page: int) -> str:
+        """Get URL for list page"""
+        base_url = f"https://www.goodreads.com/list/show/{list_id}"
+        if page > 1:
+            return f"{base_url}?page={page}"
+        return base_url
+    
+    def get_pagination_params(self, page: int) -> dict:
+        """Get pagination parameters for URL"""
+        # Only include page parameter for pages after first
+        if page > 1:
+            return {'page': page}
+        return {}
+    
+    def download_url(self, url: str, identifier: str, retries: int = 3) -> bool:
+        """Override download to handle rate limiting and retries"""
+        self.logger.info(f"Downloading: {url}")
+        success = self.downloader.download_url(url)
+        if not success:
+            self.logger.error(f"Failed to download: {url}")
+            return False
+        
+        # Get the expected cache path
+        final_path = self.get_cache_path(identifier)
+        
+        # Small delay to ensure file is closed
+        import time
+        time.sleep(0.1)
+        
+        try:
+            # Read from the downloader's cache location
+            # For paginated requests, handle both formats
+            if '_page_' in identifier:
+                base_id, page = identifier.split('_page_')
+                temp_path = Path('data/cache/list/show') / f"{base_id}page={page}.html"
+            else:
+                temp_path = Path('data/cache/list/show') / f"{identifier}.html"
+            
+            if temp_path.exists():
+                # Create parent directories if they don't exist
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Read and write in one go to avoid file locking issues
+                with open(temp_path, 'r', encoding='utf-8') as src:
+                    content = src.read()
+                    
+                # Write to the correct final path
+                with open(final_path, 'w', encoding='utf-8') as dst:
+                    dst.write(content)
+                    
+                # Also write to base path for first page to maintain compatibility
+                if not '_page_' in identifier:
+                    base_path = Path('data/cache/list/show') / f"{identifier}.html"
+                    if base_path != final_path:
+                        with open(base_path, 'w', encoding='utf-8') as base:
+                            base.write(content)
+                
+                self.logger.info(f"Saved cache file to: {final_path}")
+                return True
+                
+            self.logger.error(f"Downloaded file not found: {temp_path}")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save cache file: {e}")
+            return False
+    
+    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> list:
+        """Extract books from list page"""
+        books = []
+        book_rows = soup.find_all('tr', itemtype="http://schema.org/Book")
+        
+        if not book_rows:
+            self.logger.warning(f"No book rows found on page: {identifier}")
+            return []
+            
+        self.logger.info(f"Found {len(book_rows)} book rows on page")
+        
+        for row in book_rows:
+            book = {
+                'goodreads_id': None,
+                'title': None,
+                'author': {
+                    'goodreads_id': None,
+                    'name': None
+                },
+                'rating': None,
+                'rating_count': None,
+                'score': None,
+                'votes': None
+            }
+            
+            # Get book ID and title
+            title_link = row.find('a', class_='bookTitle')
+            if title_link:
+                book['title'] = title_link.find('span', itemprop='name').text.strip()
+                url_match = re.search(r'/show/(\d+)', title_link['href'])
+                if url_match:
+                    book['goodreads_id'] = url_match.group(1)
+            
+            # Get author info
+            author_link = row.find('a', class_='authorName')
+            if author_link:
+                book['author']['name'] = author_link.find('span', itemprop='name').text.strip()
+                author_url_match = re.search(r'/author/show/(\d+)', author_link['href'])
+                if author_url_match:
+                    book['author']['goodreads_id'] = author_url_match.group(1)
+            
+            # Get rating and rating count
+            rating_text = row.find('span', class_='minirating')
+            if rating_text:
+                text = rating_text.text.strip()
+                rating_match = re.search(r'(\d+\.\d+)\s*avg rating\s*—\s*([\d,]+)\s*ratings', text)
+                if rating_match:
+                    book['rating'] = float(rating_match.group(1))
+                    book['rating_count'] = int(rating_match.group(2).replace(',', ''))
+            
+            # Get score and votes
+            score_text = row.find('a', onclick=lambda x: x and 'score_explanation' in x)
+            if score_text:
+                score_match = re.search(r'score:\s*([\d,]+)', score_text.text)
+                if score_match:
+                    book['score'] = int(score_match.group(1).replace(',', ''))
+            
+            votes_text = row.find('a', id=lambda x: x and x.startswith('loading_link_'))
+            if votes_text:
+                votes_match = re.search(r'(\d+)\s*people voted', votes_text.text)
+                if votes_match:
+                    book['votes'] = int(votes_match.group(1))
+            
+            # Only add if we have the essential data
+            if book['goodreads_id'] and book['title']:
+                books.append(book)
+        
+        return books 
 
 
 # core/scrapers/series_scraper.py

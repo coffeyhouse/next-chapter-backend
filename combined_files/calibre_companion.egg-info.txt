@@ -21,6 +21,8 @@ Requires-Dist: SQLAlchemy
 Requires-Dist: beautifulsoup4
 Requires-Dist: requests
 Requires-Dist: Pillow
+Requires-Dist: psutil
+Requires-Dist: wmi; platform_system == "Windows"
 Dynamic: requires-dist
 
 
@@ -32,11 +34,16 @@ SQLAlchemy
 beautifulsoup4
 requests
 Pillow
+psutil
+
+[:platform_system == "Windows"]
+wmi
 
 
 
 # calibre_companion.egg-info\SOURCES.txt
 
+README.md
 setup.py
 calibre_companion.egg-info/PKG-INFO
 calibre_companion.egg-info/SOURCES.txt
@@ -54,13 +61,13 @@ cli/commands/chain.py
 cli/commands/dev.py
 cli/commands/genre.py
 cli/commands/library.py
+cli/commands/list.py
+cli/commands/monitor.py
 cli/commands/scraper.py
 cli/commands/series.py
 cli/commands/similar.py
 core/__init__.py
 core/exclusions.py
-core/cli/__init__.py
-core/cli/sync_calibre.py
 core/database/__init__.py
 core/database/base.py
 core/database/goodreads.py
@@ -90,8 +97,11 @@ core/sa/repositories/user.py
 core/scrapers/__init__.py
 core/scrapers/author_books_scraper.py
 core/scrapers/author_scraper.py
+core/scrapers/base_scraper.py
 core/scrapers/book_scraper.py
+core/scrapers/book_scraper_v2.py
 core/scrapers/editions_scraper.py
+core/scrapers/list_scraper.py
 core/scrapers/series_scraper.py
 core/scrapers/similar_scraper.py
 core/services/__init__.py

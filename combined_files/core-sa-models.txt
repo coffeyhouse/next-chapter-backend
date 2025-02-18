@@ -47,6 +47,32 @@ from datetime import datetime
 from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, Table, DateTime
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .base import Base, TimestampMixin, LastSyncedMixin
+from enum import Enum
+
+class HiddenReason(str, Enum):
+    # Vote/Data Quality
+    LOW_VOTE_COUNT = "low_vote_count"           # Too few votes to be reliable
+    NO_DESCRIPTION = "no_description"           # Missing book description
+    EXCEEDS_PAGE_LENGTH = "exceeds_page_length" # Page count too high
+    PAGE_COUNT_UNKNOWN = "page_count_unknown"   # Missing page count
+
+    # Language
+    NO_ENGLISH_EDITIONS = "no_english_editions" # No English editions found
+
+    # Excluded Format/Genre
+    EXCLUDED_GENRE = "excluded_genre"           # Book in an excluded genre (manga, etc)
+    INVALID_FORMAT = "invalid_format"           # Invalid book format
+
+    # Title Issues
+    TITLE_PATTERN_MATCH = "title_pattern_match"     # Title contains excluded pattern
+    TITLE_NUMBER_PATTERN = "title_number_pattern"   # Title contains number pattern
+    COMBINED_EDITION = "combined_edition"           # Book is a combined edition of multiple books
+
+    # Publication Info
+    INVALID_PUBLICATION = "invalid_publication" # Invalid or missing publication info
+    
+    # Manually hidden by user
+    MANUAL = "manual"        # Manually hidden by user
 
 class BookAuthor(Base, TimestampMixin):
     __tablename__ = 'book_author'
@@ -95,17 +121,17 @@ class Book(Base, TimestampMixin, LastSyncedMixin):
     title: Mapped[str] = mapped_column(String, nullable=False)
     published_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_state: Mapped[str | None] = mapped_column(String, nullable=True)
-    language: Mapped[str | None] = mapped_column(String, nullable=True)
-    calibre_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    isbn: Mapped[str | None] = mapped_column(String, nullable=True)
     goodreads_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     goodreads_votes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    hidden_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     similar_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scraping_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    next_scrape_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     book_authors = relationship('BookAuthor', back_populates='book')
@@ -174,7 +200,7 @@ class BookSeries(Base, TimestampMixin):
 
     work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
     series_id: Mapped[str] = mapped_column(ForeignKey('series.goodreads_id'), primary_key=True)
-    series_order: Mapped[float | None] = mapped_column(Float, nullable=True)
+    series_order: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     book = relationship('Book', back_populates='book_series')
