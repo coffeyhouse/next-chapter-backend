@@ -3,26 +3,27 @@
 from core.scrapers.book_scraper import BookScraper
 from core.scrapers.editions_scraper import EditionsScraper
 from core.sa.models.book import HiddenReason
+from typing import Optional, Dict, Any
 
 class BookResolver:
-    def __init__(self, scrape: bool = False):
-        self.book_scraper = BookScraper(scrape=scrape)
+    """Resolves book data from Goodreads"""
+    
+    def __init__(self, scrape: bool = False, force: bool = False):
+        self.scraper = BookScraper(scrape=scrape, force=force)
         self.editions_scraper = EditionsScraper(scrape=scrape)
 
-    def resolve_book(self, goodreads_id: str) -> dict:
+    def resolve_book(self, goodreads_id: str) -> Optional[Dict[str, Any]]:
         """
-        Resolves the final book data by:
-          1. Scraping the main book page using the given Goodreads id.
-          2. Scraping the editions page using the work id from the main book data.
-          3. Choosing the first edition from the editions result.
-          4. Fully scraping that chosen edition page (using its Goodreads id) to
-             get complete details, which replace the original book data.
+        Resolve book data from Goodreads
         
+        Args:
+            goodreads_id: Goodreads ID of the book to resolve
+            
         Returns:
-            A dictionary with the final, fully scraped book details, or None if no editions found.
+            Dictionary containing book data or None if resolution failed
         """
         # Step 1: Scrape the main book page.
-        main_book_data = self.book_scraper.scrape(goodreads_id)
+        main_book_data = self.scraper.scrape(goodreads_id)
         if not main_book_data:
             print(f"Failed to scrape the main book page for ID: {goodreads_id}")
             return None
@@ -109,7 +110,7 @@ class BookResolver:
             return None
 
         # Step 4: Fully scrape the chosen edition page.
-        final_book_data = self.book_scraper.scrape(chosen_goodreads_id)
+        final_book_data = self.scraper.scrape(chosen_goodreads_id)
         if not final_book_data:
             print("Failed to fully scrape chosen edition")
             return None

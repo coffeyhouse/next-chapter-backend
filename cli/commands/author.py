@@ -20,7 +20,8 @@ def author():
 @click.option('--goodreads-id', default=None, help='Sync a specific author by Goodreads ID')
 @click.option('--scrape/--no-scrape', default=False, help='Whether to scrape live or use cached data')
 @click.option('--verbose/--no-verbose', default=False, help='Show detailed progress')
-def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool):
+@click.option('--max-pages', default=None, type=int, help='Skip authors with more than this many pages of books')
+def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool, verbose: bool, max_pages: int):
     """Sync unsynced authors and import their books using SQLAlchemy
     
     This command uses the SQLAlchemy-based BookCreator to import books from authors.
@@ -31,6 +32,7 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
         cli author sync-sa --limit 10 --scrape  # Sync 10 authors with fresh data
         cli author sync-sa --source library  # Only sync authors with books from library
         cli author sync-sa --goodreads-id 18541  # Sync specific author by ID
+        cli author sync-sa --max-pages 2  # Skip authors with more than 2 pages of books
     """
     # Print initial sync information
     print_sync_start(days, limit, source, goodreads_id, 'authors', verbose)
@@ -43,7 +45,7 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
         # Create repositories and services
         author_repo = AuthorRepository(session)
         author_scraper = AuthorScraper(scrape=scrape)
-        books_scraper = AuthorBooksScraper(scrape=scrape)
+        books_scraper = AuthorBooksScraper(scrape=scrape, max_pages=max_pages)
         
         # Initialize progress tracker
         tracker = ProgressTracker(verbose)

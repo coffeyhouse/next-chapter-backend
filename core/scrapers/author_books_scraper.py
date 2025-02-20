@@ -8,8 +8,9 @@ from ..utils.http import GoodreadsDownloader
 class AuthorBooksScraper:
    """Scrapes list of books by an author"""
    
-   def __init__(self, scrape: bool = False):
+   def __init__(self, scrape: bool = False, max_pages: int = None):
        self.downloader = GoodreadsDownloader(scrape)
+       self.max_pages = max_pages
    
    def scrape_author_books(self, author_id: str) -> dict:
        """
@@ -32,47 +33,53 @@ class AuthorBooksScraper:
        author_name = None
        current_page = 1
        
-       while True:
-           # Get page content
-           url = self._get_page_url(author_id, current_page)
-           if not self.downloader.download_url(url):
-               if books:  # Return what we have if not first page
-                   break
-               return None
+       # Get first page to check total pages
+       url = self._get_page_url(author_id, current_page)
+       if not self.downloader.download_url(url):
+           return None
            
-           # Read the downloaded page
-           html = self._read_html(author_id, current_page)
-           if not html:
-               if books:
-                   break
+       html = self._read_html(author_id, current_page)
+       if not html:
+           return None
+           
+       try:
+           soup = BeautifulSoup(html, 'html.parser')
+           pagination = self._extract_pagination(soup)
+           total_pages = pagination['total_pages']
+           
+           # Check if total pages exceeds max_pages limit
+           if self.max_pages and total_pages > self.max_pages:
+               print(f"Skipping author {author_id} - has {total_pages} pages (max: {self.max_pages})")
                return None
                
-           try:
-               # Parse page content
-               soup = BeautifulSoup(html, 'html.parser')
-               
-               # Get author name on first page
-               if not author_name:
-                   author_name = self._extract_author_name(soup)
-               
-               # Get books from this page
-               page_books = self._extract_books(soup)
-               books.extend(page_books)
-               
-               # Check pagination
-               pagination = self._extract_pagination(soup)
-               print(f"Processing page {pagination['current_page']} of {pagination['total_pages']}")
-               
-               if current_page >= pagination['total_pages']:
+           # Get author name and first page of books
+           author_name = self._extract_author_name(soup)
+           page_books = self._extract_books(soup)
+           books.extend(page_books)
+           
+           # Continue with remaining pages
+           while current_page < total_pages:
+               current_page += 1
+               url = self._get_page_url(author_id, current_page)
+               if not self.downloader.download_url(url):
                    break
                    
-               current_page += 1
-               
-           except Exception as e:
-               print(f"Error processing page {current_page}: {e}")
-               if books:
+               html = self._read_html(author_id, current_page)
+               if not html:
                    break
-               return None
+                   
+               try:
+                   soup = BeautifulSoup(html, 'html.parser')
+                   page_books = self._extract_books(soup)
+                   books.extend(page_books)
+                   print(f"Processing page {current_page} of {total_pages}")
+               except Exception as e:
+                   print(f"Error processing page {current_page}: {e}")
+                   break
+                   
+       except Exception as e:
+           print(f"Error processing first page: {e}")
+           return None
        
        # Filter to only include books with dates
        dated_books = [b for b in books if b.get('published_date')]

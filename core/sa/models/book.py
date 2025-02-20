@@ -46,6 +46,7 @@ class BookGenre(Base, TimestampMixin):
 
     work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
     genre_id: Mapped[int] = mapped_column(ForeignKey('genre.id'), primary_key=True)
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     book = relationship('Book', back_populates='book_genres')

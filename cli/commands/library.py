@@ -50,6 +50,7 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
 
     This command uses the SQLAlchemy-based BookCreator to import books from Calibre.
     It will create book records with proper relationships for authors, genres, and series.
+    For existing books, it will update their source to 'library' and optionally rescrape their data.
 
     Example:
         cli library import-calibre-sa --calibre-path "path/to/metadata.db"
@@ -107,27 +108,60 @@ def import_calibre_sa(calibre_path: str, limit: int, scrape: bool, verbose: bool
                     }
                     
                     try:
-                        # Use process_book_ids to get or create the book
-                        books_created = process_book_ids(session, [calibre_data['goodreads_id']], source='library', scrape=scrape)
-                        book_obj = books_created[0] if books_created else None
+                        # First, check if we've scraped this book before to get its work_id
+                        scraped = session.query(BookScraped).filter_by(goodreads_id=calibre_data['goodreads_id']).first()
+                        existing_book = None
                         
-                        if book_obj:
-                            library_entry = Library(
-                                title=calibre_data['title'],
-                                calibre_id=calibre_data['calibre_id'],
-                                goodreads_id=calibre_data['goodreads_id'],
-                                work_id=book_obj.work_id,
-                                isbn=calibre_data['isbn']
-                            )
-                            session.add(library_entry)
-                            session.commit()
-                            tracker.increment_imported()
+                        if scraped and scraped.work_id:
+                            # If we have a work_id, check if the book exists
+                            existing_book = session.query(Book).filter_by(work_id=scraped.work_id).first()
+                        
+                        if existing_book:
+                            # Update source to 'library' if it's different
+                            if existing_book.source != 'library':
+                                existing_book.source = 'library'
+                                session.add(existing_book)
+                                session.commit()
+                                
+                            # If scrape is enabled, update the book data
+                            if scrape:
+                                updated_book = creator.update_book_from_goodreads(calibre_data['goodreads_id'], source='library')
+                                if updated_book:
+                                    tracker.increment_imported()
+                                    if verbose:
+                                        click.echo(click.style("  Updated existing book data", fg='green'))
+                                else:
+                                    tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                                      "Failed to update book data")
+                            else:
+                                tracker.increment_imported()
+                                if verbose:
+                                    click.echo(click.style("  Updated source to 'library'", fg='green'))
                         else:
-                            tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
-                                                "Book already exists or was previously scraped")
+                            # Create new book
+                            books_created = process_book_ids(session, [calibre_data['goodreads_id']], source='library', scrape=scrape)
+                            book_obj = books_created[0] if books_created else None
+                            
+                            if book_obj:
+                                library_entry = Library(
+                                    title=calibre_data['title'],
+                                    calibre_id=calibre_data['calibre_id'],
+                                    goodreads_id=calibre_data['goodreads_id'],
+                                    work_id=book_obj.work_id,
+                                    isbn=calibre_data['isbn']
+                                )
+                                session.add(library_entry)
+                                session.commit()
+                                tracker.increment_imported()
+                                if verbose:
+                                    click.echo(click.style("  Created new book", fg='green'))
+                            else:
+                                tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
+                                                  "Failed to create book")
+                                                  
                     except Exception as e:
                         tracker.add_skipped(calibre_data['title'], calibre_data['goodreads_id'],
-                                             f"Error: {str(e)}", 'red')
+                                          f"Error: {str(e)}", 'red')
                         session.rollback()
                     
                     tracker.increment_processed()

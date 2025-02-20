@@ -5,8 +5,9 @@ from core.utils.proxy.proxy_manager import ProxyManager
 from core.utils.rate_limit import RateLimiter
 
 class GoodreadsDownloader:
-    def __init__(self, scrape=False):
+    def __init__(self, scrape=False, force=False):
         self.scrape = scrape
+        self.force = force
         if self.scrape:
             self.proxy_manager = ProxyManager()
             self.rate_limiter = RateLimiter()
@@ -25,6 +26,10 @@ class GoodreadsDownloader:
         path_parts = parsed_url.path.strip('/').split('/')
         
         local_path = self._get_local_path(parsed_url, path_parts)
+        
+        # If force is True, delete existing cache file
+        if self.force and local_path.exists():
+            local_path.unlink()
         
         # Check if file exists locally
         if local_path.exists():

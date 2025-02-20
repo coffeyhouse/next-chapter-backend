@@ -7,12 +7,12 @@ from ..exclusions import should_exclude_book, get_exclusion_reason
 from datetime import datetime, UTC
 
 class BookCreator:
-    def __init__(self, session: Session, scrape: bool = False):
+    def __init__(self, session: Session, scrape: bool = False, force: bool = False):
         self.session = session
         # Create tables if they don't exist
         Base.metadata.create_all(session.get_bind())
         self.book_repository = BookRepository(session)
-        self.resolver = BookResolver(scrape)
+        self.resolver = BookResolver(scrape=scrape, force=force)
 
     def create_book_from_goodreads(self, goodreads_id: str, source: str = 'goodreads') -> Optional[Book]:
         """
@@ -220,7 +220,8 @@ class BookCreator:
             genre, _ = self._create_or_get_genre(genre_data)
             book_genre = BookGenre(
                 work_id=book.work_id,
-                genre_id=genre.id
+                genre_id=genre.id,
+                position=genre_data.get('position')
             )
             self.session.add(book_genre)
 
@@ -251,3 +252,57 @@ class BookCreator:
             except ValueError:
                 continue
         return None 
+
+    def update_book_from_goodreads(self, goodreads_id: str, source: str = 'goodreads') -> Optional[Book]:
+        """
+        Updates an existing book with fresh data from Goodreads
+        
+        Args:
+            goodreads_id: Goodreads ID of the book to update
+            source: Source of the book (default: 'goodreads')
+            
+        Returns:
+            Updated Book object or None if book doesn't exist or update failed
+        """
+        # Get the existing book
+        existing_book = self.book_repository.get_by_goodreads_id(goodreads_id)
+        if not existing_book:
+            return None
+
+        # Resolve book data
+        book_data = self.resolver.resolve_book(goodreads_id)
+        if not book_data:            
+            print(f"Failed to resolve book data for {goodreads_id}")
+            return None
+
+        # Update the book entity
+        now = datetime.now(UTC)
+        existing_book.title = book_data['title']
+        existing_book.work_id = book_data['work_id']
+        existing_book.published_date = self._parse_date(book_data.get('published_date'))
+        existing_book.published_state = book_data.get('published_state')
+        existing_book.pages = book_data.get('pages')
+        existing_book.goodreads_rating = book_data.get('goodreads_rating')
+        existing_book.goodreads_votes = book_data.get('goodreads_votes')
+        existing_book.description = book_data.get('description')
+        existing_book.image_url = book_data.get('image_url')
+        existing_book.source = source
+        existing_book.last_synced_at = now
+
+        # Delete existing relationships
+        self.session.query(BookAuthor).filter_by(work_id=existing_book.work_id).delete()
+        self.session.query(BookGenre).filter_by(work_id=existing_book.work_id).delete()
+        self.session.query(BookSeries).filter_by(work_id=existing_book.work_id).delete()
+
+        # Create new relationships
+        self._create_author_relationships(existing_book, book_data.get('authors', []))
+        self._create_genre_relationships(existing_book, book_data.get('genres', []))
+        self._create_series_relationships(existing_book, book_data.get('series', []))
+        
+        try:
+            self.session.commit()
+            return existing_book
+        except Exception as e:
+            print(f"Error updating book {goodreads_id}: {str(e)}")
+            self.session.rollback()
+            return None 

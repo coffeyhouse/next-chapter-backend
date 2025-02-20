@@ -255,7 +255,11 @@ class BookRepository:
                 query = query.filter(Book.source == source)
         
         # Filter for books that haven't been synced for similar books
-        query = query.filter(Book.similar_synced_at.is_(None))
+        # and are not hidden
+        query = query.filter(
+            Book.similar_synced_at.is_(None),
+            Book.hidden.is_(False)  # Add filter for non-hidden books
+        )
         
         # Only include published books with ratings and votes
         query = query.filter(

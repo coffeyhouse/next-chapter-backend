@@ -31,7 +31,8 @@ EXCLUSION_RULES = {
         "Review Summary",
         "collection: ",
         "unofficial guide",
-        "Unauthorized guide"
+        "Unauthorized guide",
+        "cliffsnotes",
     ],     
     "max_pages": 1600,                     # Exclude books with more than 1600 pages
 }

@@ -11,8 +11,8 @@ from ..utils.image import download_book_cover
 class BookScraper:
     """Scrapes a book page from Goodreads"""
     
-    def __init__(self, scrape: bool = False):
-        self.downloader = GoodreadsDownloader(scrape)
+    def __init__(self, scrape: bool = False, force: bool = False):
+        self.downloader = GoodreadsDownloader(scrape, force)
         
     def scrape(self, book_id: str) -> dict:
         """
@@ -333,12 +333,13 @@ class BookScraper:
                 
                 for value in book_data.values():
                     if isinstance(value, dict) and 'bookGenres' in value:
-                        for genre_data in value['bookGenres']:
+                        for position, genre_data in enumerate(value['bookGenres']):
                             if isinstance(genre_data, dict) and 'genre' in genre_data:
                                 genre = genre_data['genre']
                                 if isinstance(genre, dict):
                                     genres.append({
-                                        'name': genre.get('name', '')
+                                        'name': genre.get('name', ''),
+                                        'position': position
                                     })
                         break
             except (json.JSONDecodeError, KeyError):

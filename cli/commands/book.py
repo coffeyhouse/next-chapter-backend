@@ -9,6 +9,7 @@ from io import BytesIO
 from core.exclusions import get_exclusion_reason
 from core.sa.models import Book, BookAuthor, BookGenre
 from core.sa.models.book import HiddenReason
+from datetime import datetime, timedelta, UTC
 
 @click.group()
 def book():
@@ -158,6 +159,10 @@ def _check_combined_titles(session: Session, book: Book) -> tuple[bool, list[tup
     Returns:
         Tuple of (is_combined, list of matched parts with their work_ids)
     """
+    # Skip if already marked as combined edition
+    if book.hidden and book.hidden_reason == HiddenReason.COMBINED_EDITION:
+        return False, []
+    
     # Common separators that might indicate multiple books
     separators = [
         '/',           # "Book1/Book2"
@@ -360,6 +365,144 @@ def check_exclusions(limit: Optional[int], verbose: bool, work_id: Optional[str]
             
     except Exception as e:
         click.echo(f"\nError checking exclusions: {e}", err=True)
+        raise
+    finally:
+        session.close()
+
+@book.command()
+@click.option('--limit', type=int, default=None, help='Limit number of books to rescrape')
+@click.option('--verbose', is_flag=True, help='Show detailed progress')
+@click.option('--force/--no-force', default=True, help='Force fresh scrape ignoring cache')
+@click.option('--days', type=int, default=3, help='Number of days since last sync to consider stale')
+@click.option('--goodreads-id', type=str, default=None, help='Specific Goodreads ID to rescrape')
+@click.option('--recent', is_flag=True, help='Include books released in past 30 days and upcoming releases')
+def rescrape_stale(limit: Optional[int], verbose: bool, force: bool, days: int, goodreads_id: Optional[str], recent: bool):
+    """Rescrape books that haven't been synced in the specified number of days.
+
+    Example:
+        cli book rescrape-stale  # Rescrape all books not synced in 3 days
+        cli book rescrape-stale --limit 10  # Rescrape up to 10 stale books
+        cli book rescrape-stale --verbose  # Show detailed progress
+        cli book rescrape-stale --no-force  # Use cached data if available
+        cli book rescrape-stale --days 7  # Rescrape books not synced in 7 days
+        cli book rescrape-stale --goodreads-id 54493401  # Rescrape specific book
+        cli book rescrape-stale --recent  # Rescrape recent and upcoming releases
+    """
+    db = Database()
+    session = Session(db.engine)
+    
+    try:
+        if goodreads_id:
+            # If goodreads_id is provided, just get that specific book
+            stale_books = [session.query(Book).filter(Book.goodreads_id == goodreads_id).first()]
+            if not stale_books[0]:
+                click.echo(f"No book found with Goodreads ID: {goodreads_id}")
+                return
+        else:
+            # Base query
+            query = session.query(Book)
+            
+            # Don't include books synced in last 24 hours
+            one_day_ago = datetime.now(UTC) - timedelta(days=1)
+            query = query.filter(
+                (Book.last_synced_at < one_day_ago) | (Book.last_synced_at.is_(None))
+            )
+            
+            if recent:
+                # Get books released in the past 30 days or upcoming
+                thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
+                query = query.filter(
+                    (
+                        # Recent releases (past 30 days)
+                        (Book.published_date >= thirty_days_ago)
+                    ) | (
+                        # Upcoming releases
+                        (Book.published_state == 'upcoming')
+                    )
+                )
+                # Order by release date (upcoming first, then most recent)
+                query = query.order_by(
+                    # Put upcoming releases first
+                    Book.published_state.desc(),
+                    # Then order by published date, most recent first
+                    Book.published_date.desc()
+                )
+            else:
+                # Find books not synced in specified days
+                cutoff_date = datetime.now(UTC) - timedelta(days=days)
+                query = query.filter(
+                    (Book.last_synced_at < cutoff_date) | (Book.last_synced_at.is_(None))
+                )
+            
+            if limit:
+                query = query.limit(limit)
+                
+            stale_books = query.all()
+        
+        if verbose:
+            if recent:
+                click.echo(f"Found {len(stale_books)} recent/upcoming books to process")
+                if stale_books:
+                    click.echo("\nProcessing books in this order:")
+                    for book in stale_books:
+                        status = "UPCOMING" if book.published_state == 'upcoming' else "RELEASED"
+                        date_str = book.published_date.strftime('%Y-%m-%d') if book.published_date else 'No date'
+                        click.echo(f"  - {book.title} ({status}, {date_str})")
+            else:
+                click.echo(f"Found {len(stale_books)} books to process")
+            
+        success_count = 0
+        fail_count = 0
+        
+        for book in stale_books:
+            if verbose:
+                click.echo(f"\nProcessing {book.title} (ID: {book.goodreads_id})")
+                if recent and book.published_date:
+                    status = "UPCOMING" if book.published_state == 'upcoming' else "RELEASED"
+                    click.echo(f"  Status: {status}")
+                    click.echo(f"  Published: {book.published_date.strftime('%Y-%m-%d')}")
+                    if book.last_synced_at:
+                        click.echo(f"  Last synced: {book.last_synced_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                    click.echo(f"  Source: {book.source}")
+                
+            try:
+                # Process the book with force_update=True to ensure it gets updated
+                # and scrape=True to force fresh scraping
+                # Pass through the original source to preserve it
+                updated_books = process_book_ids(
+                    session, 
+                    [book.goodreads_id], 
+                    source=book.source or 'rescrape',  # Use original source if available
+                    scrape=True,
+                    force_update=True,
+                    force=force  # Pass through the force parameter
+                )
+                
+                if updated_books:
+                    success_count += 1
+                    if verbose:
+                        click.echo(click.style("Successfully updated", fg='green'))
+                else:
+                    fail_count += 1
+                    if verbose:
+                        click.echo(click.style("Failed to update", fg='red'))
+                        
+            except Exception as e:
+                fail_count += 1
+                if verbose:
+                    click.echo(click.style(f"Error: {str(e)}", fg='red'))
+                    
+        # Print summary
+        click.echo(f"\nRescrape complete:")
+        if recent:
+            click.echo(f"  Total recent/upcoming books found: {len(stale_books)}")
+        else:
+            click.echo(f"  Total books found: {len(stale_books)}")
+        click.echo(f"  Successfully updated: {success_count}")
+        click.echo(f"  Failed to update: {fail_count}")
+        
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
         raise
     finally:
         session.close()
