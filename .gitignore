@@ -18,3 +18,20 @@ data/
 # Ignore IDE configurations
 .vscode/
 .idea/
+
+# Ignore pytest cache
+.pytest_cache/
+
+# Ignore egg-info directory
+*.egg-info/
+
+# Ignore combined files folder
+combined_files/
+
+# Ignore migrations folder
+migrations/
+
+# Ignore specific tracking files
+read_books.json
+exclusions.txt
+skipped_author_books.txt
