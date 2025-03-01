@@ -8,13 +8,8 @@
 |-- CACHEDIR.TAG
 |-- README.md
 +-- api/
-|   +-- routes/
-|   |-- books.py
-|   |-- users.py
-|   +-- schemas/
-|   |-- book.py
-|   |-- user.py
 |-- main.py
+|-- schemas.py
 +-- calibre_companion.egg-info/
 |-- PKG-INFO
 |-- SOURCES.txt
@@ -40,8 +35,6 @@
 |-- main.py
 |-- utils.py
 +-- combined_files/
-|-- api-routes.txt
-|-- api-schemas.txt
 |-- api.txt
 |-- calibre_companion.egg-info.txt
 |-- cli-commands.txt
@@ -132,8 +125,11 @@
 |   +-- db/
 |   +-- images/
 |   |   +-- author/
+|-- books.db [empty]
 +-- migrations/
 |   +-- versions/
+|   |-- 213f09ba8e34_merge_book_scraping_and_position.py
+|   |-- 575e4809f992_add_position_to_book_genre.py
 |   |-- a33b00fc340b_add_user_subscription_tables.py
 |   |-- add_book_scraping_columns.py
 |   |-- aeb280782a0d_add_bookwanted_table.py

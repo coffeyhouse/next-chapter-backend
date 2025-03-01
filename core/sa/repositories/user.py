@@ -162,12 +162,21 @@ class UserRepository:
         """
         return self.session.query(User).filter(User.id == user_id).one_or_none()
 
-    def search_users(self, query: str, limit: int = 20) -> List[User]:
+    def count_users(self) -> int:
+        """Get the total number of users.
+        
+        Returns:
+            Total number of users in the database
+        """
+        return self.session.query(User).count()
+
+    def search_users(self, query: str, limit: int = 20, offset: int = 0) -> List[User]:
         """Search for users by name.
         
         Args:
             query: The search query string
             limit: Maximum number of results to return (default: 20)
+            offset: Number of records to skip (default: 0)
             
         Returns:
             List of matching User objects
@@ -175,7 +184,7 @@ class UserRepository:
         base_query = self.session.query(User)
         if query:
             base_query = base_query.filter(User.name.ilike(f"%{query}%"))
-        return base_query.limit(limit).all()
+        return base_query.offset(offset).limit(limit).all()
 
     def get_users_by_book(self, goodreads_id: str) -> List[User]:
         """Get all users who have a relationship with a specific book.
@@ -718,10 +727,6 @@ class UserRepository:
             .all()
         )
         
-        print(f"\nFound {len(reading_books)} books currently being read")
-        for book in reading_books:
-            print(f"Currently reading: {book.title}")
-        
         # Get all series where the user has read at least one book, ordered by last read date
         read_series = (
             self.session.query(Series, func.max(BookUser.finished_at).label('last_read'))
@@ -741,8 +746,6 @@ class UserRepository:
             .order_by(desc('last_read'))
             .all()
         )
-        
-        print(f"\nFound {len(read_series)} series with completed books")
         
         # For each series, get the next unread book
         next_in_series_books = []
@@ -799,9 +802,6 @@ class UserRepository:
             )
             
             if next_book:
-                print(f"\nFound next book in series {series.title}:")
-                print(f"  - {next_book.title} (order: {next_book.book_series[0].series_order})")
-                print(f"  - Last book in series read: {last_read}")
                 next_in_series_books.append(next_book)
         
         # Combine and deduplicate the results
@@ -1323,4 +1323,52 @@ class UserRepository:
             for ba in first_book.book_authors:
                 if ba.role == "Author":
                     return ba.author.goodreads_id
-        return None 
+        return None
+
+    def get_recent_books(
+        self,
+        user_id: int,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
+        """Get recently created books.
+        
+        Args:
+            user_id: The ID of the user (for loading user-specific status)
+            limit: Maximum number of results to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of Book objects ordered by created_at date
+        """
+        return (
+            self.session.query(Book)
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series),
+                joinedload(Book.book_users)
+            )
+            .filter(
+                Book.hidden == False,
+                Book.source != None
+            )
+            .order_by(desc(Book.created_at))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    def count_recent_books(self) -> int:
+        """Get total count of books for pagination.
+        
+        Returns:
+            Total number of non-hidden books
+        """
+        return (
+            self.session.query(Book)
+            .filter(
+                Book.hidden == False,
+                Book.source != None
+            )
+            .count()
+        ) 

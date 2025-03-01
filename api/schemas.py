@@ -1,7 +1,7 @@
 # api/schemas.py
 
 from typing import List, Optional, TypeVar, Generic
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 
@@ -11,31 +11,48 @@ class AuthorSchema(BaseModel):
     name: str
     bio: Optional[str] = None
     image_url: Optional[str] = None
+    role: Optional[str] = None
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SeriesSchema(BaseModel):
     goodreads_id: str
     title: str
+    order: Optional[str] = None
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GenreSchema(BaseModel):
     id: int
     name: str
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-class BookSchema(BaseModel):
+class SimilarBookAuthorSchema(BaseModel):
+    goodreads_id: str
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarBookSchema(BaseModel):
+    goodreads_id: str
+    work_id: str
+    title: str
+    goodreads_rating: Optional[float] = None
+    goodreads_votes: Optional[int] = None
+    hidden: bool
+    user_status: Optional[str] = None
+    wanted: bool = False
+    authors: List[SimilarBookAuthorSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BasicBookSchema(BaseModel):
     goodreads_id: str
     work_id: str
     title: str
@@ -49,25 +66,26 @@ class BookSchema(BaseModel):
     source: Optional[str] = None
     hidden: bool
     hidden_reason: Optional[str] = None
-    user_status: Optional[str] = None  # Add user_status field
-    wanted: bool = False  # Add wanted field
-
+    user_status: Optional[str] = None
+    wanted: bool = False
     authors: List[AuthorSchema] = []
     genres: List[GenreSchema] = []
     series: List[SeriesSchema] = []
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BookSchema(BasicBookSchema):
+    similar_books: List[SimilarBookSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserSchema(BaseModel):
     id: int
     name: str
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BookUserSchema(BaseModel):  # Representation of user's relationship with a book (e.g., read status)
@@ -78,22 +96,18 @@ class BookUserSchema(BaseModel):  # Representation of user's relationship with a
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
-    book: BookSchema
+    book: BasicBookSchema  # Change to BasicBookSchema since we don't need similar books here
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BookWantedSchema(BaseModel):
     work_id: str
     user_id: int
     source: str
-    book: BookSchema
+    book: BasicBookSchema  # Change to BasicBookSchema since we don't need similar books here
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserAuthorSubscriptionSchema(BaseModel):
@@ -101,19 +115,16 @@ class UserAuthorSubscriptionSchema(BaseModel):
     author_goodreads_id: str
     author: AuthorSchema
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserSeriesSubscriptionSchema(BaseModel):
     user_id: int
     series_goodreads_id: str
     series: SeriesSchema
+    first_three_book_ids: Optional[List[str]] = None
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Input/Create Schemas (for POST/PUT requests)

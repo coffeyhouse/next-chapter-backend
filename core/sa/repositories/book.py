@@ -31,7 +31,8 @@ class BookRepository:
                 joinedload(Book.book_series).joinedload(BookSeries.series),
                 joinedload(Book.genres),
                 joinedload(Book.book_users),
-                joinedload(Book.similar_to).joinedload(BookSimilar.similar_book)
+                joinedload(Book.similar_to).joinedload(BookSimilar.similar_book),
+                joinedload(Book.similar_books).joinedload(BookSimilar.book)
             )
             .first()
         )
