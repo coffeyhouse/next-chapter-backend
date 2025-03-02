@@ -1,37 +1,48 @@
-# Ignore Python cache
+# Bytecode and caches
 __pycache__/
 *.py[cod]
 *.pyo
 
-# Ignore environment and dependency files
+# Virtual environments
 env/
-*.env
-*.db
+*.env/
 
-# Ignore data exports or generated files
+# Database files
+*.db
+books.db
+
+# Data directories (cache, images, etc.)
 data/
 
-# Ignore logs and temporary files
+# Logs and temporary files
 *.log
 *.tmp
 
-# Ignore IDE configurations
+# IDE/editor configuration
 .vscode/
 .idea/
 
-# Ignore pytest cache
+# Testing cache
 .pytest_cache/
 
-# Ignore egg-info directory
+# Egg-info (including calibre_companion.egg-info)
 *.egg-info/
 
-# Ignore combined files folder
-combined_files/
-
-# Ignore migrations folder
+# Migrations (if generated automatically)
 migrations/
 
-# Ignore specific tracking files
+# Combined files or auto-generated documentation
+combined_files/
+
+# Windows system files
+Thumbs.db
+desktop.ini
+
+# OS generated files
+.DS_Store
+
+# Miscellaneous generated/tracking files
+CACHEDIR.TAG
 read_books.json
 exclusions.txt
 skipped_author_books.txt
