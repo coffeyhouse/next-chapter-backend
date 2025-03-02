@@ -1,7 +1,7 @@
 # api/schemas.py
 
 from typing import List, Optional, TypeVar, Generic
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import datetime
 
 
@@ -138,6 +138,14 @@ class BookStatusUpdate(BaseModel):
     source: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    
+    @field_validator('started_at', 'finished_at', mode='before')
+    @classmethod
+    def validate_dates(cls, value):
+        # Convert empty strings to None
+        if value == "":
+            return None
+        return value
 
 
 class AuthorSubscriptionCreate(BaseModel):

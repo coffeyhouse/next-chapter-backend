@@ -119,7 +119,7 @@ class BookRepository:
         limit: int = 20,
         offset: int = 0
     ) -> List[Book]:
-        """Get books by an author, sorted by publication date.
+        """Get books by an author, sorted by publication date (newest first).
         
         Args:
             author_id: The Goodreads ID of the author
@@ -128,12 +128,16 @@ class BookRepository:
             offset: Number of books to skip
             
         Returns:
-            List of Book objects with loaded relationships
+            List of Book objects with loaded relationships, sorted by publication date descending,
+            excluding hidden books
         """
         query = (
             self.session.query(Book)
             .join(BookAuthor)
-            .filter(BookAuthor.author_id == author_id)
+            .filter(
+                BookAuthor.author_id == author_id,
+                Book.hidden.is_(False)  # Exclude hidden books
+            )
             .options(
                 joinedload(Book.book_authors).joinedload(BookAuthor.author),
                 joinedload(Book.book_series).joinedload(BookSeries.series)
@@ -147,9 +151,9 @@ class BookRepository:
                 joinedload(Book.book_wanted)
             )
             
-        # Sort by publication date (nulls last)
+        # Sort by publication date (newest first, nulls last)
         query = query.order_by(
-            Book.published_date.asc().nulls_last(),
+            Book.published_date.desc().nulls_last(),
             Book.title.asc()
         )
         
@@ -162,12 +166,15 @@ class BookRepository:
             author_id: The Goodreads ID of the author
             
         Returns:
-            Total count of books by the author
+            Total count of non-hidden books by the author
         """
         return (
             self.session.query(func.count(Book.work_id))
             .join(BookAuthor)
-            .filter(BookAuthor.author_id == author_id)
+            .filter(
+                BookAuthor.author_id == author_id,
+                Book.hidden.is_(False)  # Exclude hidden books from count
+            )
             .scalar() or 0
         )
 

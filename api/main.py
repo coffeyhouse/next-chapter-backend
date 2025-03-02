@@ -291,13 +291,24 @@ def get_user_books(
 def update_book_status(user_id: int, work_id: str, status_update: BookStatusUpdate, db: Session = Depends(get_db)):
     repo = BookRepository(db)
     user_repo = UserRepository(db)
+    
+    # Handle empty string values for date fields
+    started_at = status_update.started_at
+    finished_at = status_update.finished_at
+    
+    # If dates are empty strings, set them to None
+    if started_at == "":
+        started_at = None
+    if finished_at == "":
+        finished_at = None
+    
     book_user = repo.update_book_status(
         user_id=user_id,
         work_id=work_id,
         status=status_update.status,
         source=status_update.source,
-        started_at=status_update.started_at,
-        finished_at=status_update.finished_at
+        started_at=started_at,
+        finished_at=finished_at
     )
     if book_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book or User not found")
@@ -413,12 +424,33 @@ def get_completed_books(
         offset=skip
     )
 
+    # Process each book to include user status and wanted state
+    processed_books = []
+    for book in books:
+        # Determine user's status for this book
+        book_user = next(
+            (bu for bu in book.book_users if bu.user_id == user_id), None
+        )
+        user_status = book_user.status if book_user else None
+
+        # Check if the book is in the user's wanted list
+        wanted = any(bw.user_id == user_id for bw in book.book_wanted)
+
+        # Create the BookSchema with user-specific information
+        book_schema = BasicBookSchema.model_validate(book).model_copy(
+            update={
+                "user_status": user_status,
+                "wanted": wanted,
+            },
+        )
+        processed_books.append(book_schema)
+
     # Construct and return the PaginatedResponse
     return PaginatedResponse[BasicBookSchema](
         page=page,
         total_pages=total_pages,
         total_items=total_items,
-        data=books,
+        data=processed_books,
     )
 
 @app.get("/user/{user_id}/books/recent", response_model=PaginatedResponse[BasicBookSchema])
@@ -544,11 +576,64 @@ def get_author(user_id: int, author_id: str, db: Session = Depends(get_db)): #Ad
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
     return author
 
-@app.get("/user/{user_id}/author/{author_id}/books", response_model=List[BasicBookSchema])
-def get_author_books(user_id: int, author_id: str, db: Session = Depends(get_db)): #Added user_id, but not used
+@app.get("/user/{user_id}/author/{author_id}/books", response_model=PaginatedResponse[BasicBookSchema])
+def get_author_books(
+    user_id: int,
+    author_id: str,
+    db: Session = Depends(get_db),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=10, le=100, description="Maximum number of books to return"),
+):
+    """
+    Get a paginated list of books by an author, including user-specific information.
+    """
     repo = BookRepository(db)
-    books = repo.get_books_by_author(author_id)
-    return books
+    
+    # Get total number of books by this author
+    total_items = repo.count_books_by_author(author_id)
+
+    # Calculate pagination metadata
+    total_pages = (total_items + limit - 1) // limit
+
+    # Calculate skip (offset) from page
+    skip = (page - 1) * limit
+
+    # Get paginated books
+    books = repo.get_books_by_author(
+        author_id=author_id,
+        user_id=user_id,  # Pass user_id to include user-specific relationships
+        limit=limit,
+        offset=skip
+    )
+
+    # Process each book to include user status and wanted state
+    processed_books = []
+    for book in books:
+        # Determine user's status for this book
+        book_user = next(
+            (bu for bu in book.book_users if bu.user_id == user_id), None
+        )
+        user_status = book_user.status if book_user else None
+
+        # Check if the book is in the user's wanted list
+        wanted = any(bw.user_id == user_id for bw in book.book_wanted)
+
+        # Create the BookSchema with user-specific information
+        book_schema = BasicBookSchema.model_validate(book).model_copy(
+            update={
+                "user_status": user_status,
+                "wanted": wanted,
+            },
+        )
+        processed_books.append(book_schema)
+
+    # Construct and return the PaginatedResponse
+    return PaginatedResponse[BasicBookSchema](
+        page=page,
+        total_pages=total_pages,
+        total_items=total_items,
+        data=processed_books,
+    )
 
 # User Genre Endpoints (Example)
 @app.get("/user/{user_id}/genres", response_model=List[GenreSchema])
