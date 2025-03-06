@@ -491,3 +491,64 @@ class BookRepository:
         )
         self.session.commit()
         return result > 0
+
+    def get_upcoming_books_from_read_authors(
+        self,
+        user_id: int,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Book]:
+        """
+        Retrieve upcoming books from authors the user has read.
+
+        Args:
+            user_id: The ID of the user.
+            limit: Maximum number of books to return.
+            offset: Number of books to skip.
+
+        Returns:
+            List of Book objects with "upcoming" publication status from authors the user has read.
+        """
+
+        # Subquery to find authors the user has read
+        read_authors_subquery = (
+            self.session.query(BookAuthor.author_id)
+            .join(Book, BookAuthor.work_id == Book.work_id)
+            .join(BookUser, Book.work_id == BookUser.work_id)
+            .filter(BookUser.user_id == user_id, BookUser.status == "completed")
+            .distinct()
+            .subquery()
+        )
+
+        # Main query to find upcoming books by those authors
+        query = (
+            self.session.query(Book)
+            .join(BookAuthor, Book.work_id == BookAuthor.work_id)
+            .filter(
+                BookAuthor.author_id.in_(read_authors_subquery),
+                Book.published_state == "upcoming",
+                Book.hidden.is_(False) # Exclude hidden books
+            )
+            .options(
+                joinedload(Book.book_authors).joinedload(BookAuthor.author),
+                joinedload(Book.book_series).joinedload(BookSeries.series)
+            )
+            .order_by(Book.published_date.asc()) # Order by release date, soonest first
+        )
+        
+        total = self.session.query(Book).join(BookAuthor, Book.work_id == BookAuthor.work_id)\
+            .filter(
+                BookAuthor.author_id.in_(read_authors_subquery),
+                Book.published_state == "upcoming",
+                Book.hidden.is_(False) # Exclude hidden books
+            ).count()
+
+        books = query.offset(offset).limit(limit).all()
+        
+        # For each book, set the order attribute on each series
+        for book in books:
+            for book_series in book.book_series:
+                # Set the order attribute on the series object
+                book_series.series.order = book_series.series_order
+        
+        return books, total

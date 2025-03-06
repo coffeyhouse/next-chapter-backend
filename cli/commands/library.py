@@ -8,6 +8,7 @@ import sqlite3
 from ..utils import ProgressTracker, create_progress_bar
 from typing import Dict, Any, List
 from core.utils.book_sync_helper import process_book_ids
+from datetime import datetime, timezone
 
 # Default Calibre database path
 DEFAULT_CALIBRE_PATH = "C:/Users/warre/Calibre Library/metadata.db"
@@ -33,7 +34,58 @@ def determine_status(read_percent: float) -> str:
     elif read_percent == 100:
         return "completed"
     else:
-        return "reading"
+        return "reading"  # Any progress between 1-99% means currently reading
+
+def get_reading_progress(calibre_path: str) -> List[Dict[str, Any]]:
+    """Get reading progress data from Calibre database.
+    
+    Args:
+        calibre_path: Path to Calibre metadata.db file
+        
+    Returns:
+        List of dictionaries containing reading progress data for each book
+    """
+    with sqlite3.connect(calibre_path) as calibre_conn:
+        query = """
+            SELECT 
+                books.id AS calibre_id,
+                books.title,
+                gr.val AS goodreads_id,
+                warren_read.value AS warren_last_read,
+                warren_progress.value AS warren_read_percent,
+                ruth_read.value AS ruth_last_read,
+                ruth_progress.value AS ruth_read_percent
+            FROM books
+            LEFT JOIN identifiers gr 
+                ON gr.book = books.id 
+                AND gr.type = 'goodreads'
+            LEFT JOIN custom_column_6 warren_read  -- Warren's last read date
+                ON warren_read.book = books.id
+            LEFT JOIN custom_column_5 warren_progress  -- Warren's reading progress
+                ON warren_progress.book = books.id
+            LEFT JOIN custom_column_14 ruth_read    -- Ruth's last read date
+                ON ruth_read.book = books.id
+            LEFT JOIN custom_column_12 ruth_progress    -- Ruth's reading progress
+                ON ruth_progress.book = books.id
+            WHERE gr.val IS NOT NULL
+                AND (warren_progress.value > 0 OR ruth_progress.value > 0)
+        """
+        
+        cursor = calibre_conn.execute(query)
+        books_data = []
+        
+        for row in cursor:
+            books_data.append({
+                'calibre_id': row[0],
+                'title': row[1],
+                'goodreads_id': row[2],
+                'warren_last_read': row[3],
+                'warren_read_percent': row[4] or 0,
+                'ruth_last_read': row[5],
+                'ruth_read_percent': row[6] or 0
+            })
+            
+        return books_data
 
 @click.group()
 def library():
@@ -309,23 +361,13 @@ def delete_by_source(source: str, force: bool, verbose: bool):
         session.close()
 
 @library.command()
-@click.option('--calibre-path', type=click.Path(exists=True), default=DEFAULT_CALIBRE_PATH, help="Path to Calibre metadata.db (optional)")
+@click.option('--calibre-path', type=click.Path(exists=True), default=DEFAULT_CALIBRE_PATH, help="Path to Calibre metadata.db")
 @click.option('--dry-run', is_flag=True, help="Print data without making changes")
 def sync_reading(calibre_path: str, dry_run: bool):
-    """Sync reading progress from Calibre database
-
-    Example:
-        cli library sync-reading  # Sync with default Calibre path
-        cli library sync-reading --calibre-path "path/to/metadata.db"  # Use custom path
-        cli library sync-reading --dry-run  # Preview changes without applying them
-    """
+    """Sync reading progress from Calibre database"""
     data = get_reading_progress(calibre_path)
     print_reading_data(data)
     
-    if dry_run:
-        print("\nDry run - no changes made")
-        return
-        
     db = Database()
     session: Session = db.get_session()
     user_repo = UserRepository(session)
@@ -334,57 +376,102 @@ def sync_reading(calibre_path: str, dry_run: bool):
         warren = user_repo.get_or_create_user("Warren")
         ruth = user_repo.get_or_create_user("Ruth")
         
-        print(f"\nUsers:")
-        print(f"Warren (ID: {warren.id})")
-        print(f"Ruth (ID: {ruth.id})")
+        print(f"\nProcessing Updates:")
+        print("=" * 80)
         
         total_processed = 0
         warren_updates = 0
         ruth_updates = 0
         
         for entry in data:
-            print(f"\nProcessing book: {entry['title']}")
+            updates_found = False
+            print(f"\nBook: {entry['title']} (Goodreads ID: {entry['goodreads_id']})")
             
+            # Process Warren's reading status
             if entry['warren_read_percent'] > 0:
+                existing = user_repo.get_book_status(warren.id, entry['goodreads_id'])
                 status = determine_status(entry['warren_read_percent'])
-                print(f"Warren's status: {status} ({entry['warren_read_percent']}%)")
-                result = user_repo.update_book_status(
-                    user_id=warren.id,
-                    goodreads_id=entry['goodreads_id'],
-                    status=status,
-                    source="calibre",
-                    started_at=None,
-                    finished_at=entry['warren_last_read'] if status == "completed" else None
+                
+                # Convert string datetime to Python datetime with UTC timezone
+                warren_last_read = datetime.fromisoformat(entry['warren_last_read'].replace('Z', '+00:00')).replace(tzinfo=timezone.utc) if entry['warren_last_read'] else None
+                
+                should_update = (
+                    (status == "completed" and (not existing or existing.status != "completed")) or
+                    (status == "reading" and (not existing or existing.source == "calibre")) or
+                    (existing and existing.source == "calibre")
                 )
-                if result:
+                
+                if should_update:
+                    updates_found = True
                     warren_updates += 1
-                    print("Warren's status updated")
-                else:
-                    print("Failed to update Warren's status")
+                    print("  Warren:")
+                    print(f"    Current: {existing.status if existing else 'None'} " +
+                          f"({existing.source if existing else 'N/A'})")
+                    print(f"    New: {status} ({entry['warren_read_percent']}%)")
+                    print(f"    Last Read: {warren_last_read}")
+                    if not dry_run:
+                        result = user_repo.update_book_status(
+                            user_id=warren.id,
+                            goodreads_id=entry['goodreads_id'],
+                            status=status,
+                            source="calibre",
+                            started_at=None,
+                            finished_at=warren_last_read if status == "completed" else None
+                        )
+                        if result:
+                            print("    Successfully updated Warren's status")
+                        else:
+                            print("    Failed to update Warren's status")
             
+            # Process Ruth's reading status
             if entry['ruth_read_percent'] > 0:
+                existing = user_repo.get_book_status(ruth.id, entry['goodreads_id'])
                 status = determine_status(entry['ruth_read_percent'])
-                print(f"Ruth's status: {status} ({entry['ruth_read_percent']}%)")
-                result = user_repo.update_book_status(
-                    user_id=ruth.id,
-                    goodreads_id=entry['goodreads_id'],
-                    status=status,
-                    source="calibre",
-                    started_at=None,
-                    finished_at=entry['ruth_last_read'] if status == "completed" else None
+                
+                # Convert string datetime to Python datetime with UTC timezone
+                ruth_last_read = datetime.fromisoformat(entry['ruth_last_read'].replace('Z', '+00:00')).replace(tzinfo=timezone.utc) if entry['ruth_last_read'] else None
+                
+                should_update = (
+                    (status == "completed" and (not existing or existing.status != "completed")) or
+                    (status == "reading" and (not existing or existing.source == "calibre")) or
+                    (existing and existing.source == "calibre")
                 )
-                if result:
+                
+                if should_update:
+                    updates_found = True
                     ruth_updates += 1
-                    print("Ruth's status updated")
-                else:
-                    print("Failed to update Ruth's status")
-                    
-            total_processed += 1
+                    print("  Ruth:")
+                    print(f"    Current: {existing.status if existing else 'None'} " +
+                          f"({existing.source if existing else 'N/A'})")
+                    print(f"    New: {status} ({entry['ruth_read_percent']}%)")
+                    print(f"    Last Read: {ruth_last_read}")
+                    if not dry_run:
+                        result = user_repo.update_book_status(
+                            user_id=ruth.id,
+                            goodreads_id=entry['goodreads_id'],
+                            status=status,
+                            source="calibre",
+                            started_at=None,
+                            finished_at=ruth_last_read if status == "completed" else None
+                        )
+                        if result:
+                            print("    Successfully updated Ruth's status")
+                        else:
+                            print("    Failed to update Ruth's status")
+            
+            if updates_found:
+                total_processed += 1
+            else:
+                print("  No updates needed")
         
-        print(f"\nSync Results:")
-        print(f"Total books processed: {total_processed}")
+        print("\nSummary:")
+        print("=" * 80)
+        print(f"Books with updates: {total_processed}")
         print(f"Warren's updates: {warren_updates}")
         print(f"Ruth's updates: {ruth_updates}")
+        
+        if dry_run:
+            print("\nDry run - no changes were made")
         
     finally:
         session.close()

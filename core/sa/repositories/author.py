@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import desc, func, or_, distinct
 from sqlalchemy.orm import Session
-from ..models import Author, Book, BookAuthor, BookUser
+from ..models import Author, Book, BookAuthor, BookUser, Series, BookSeries
 
 class AuthorRepository:
     def __init__(self, session: Session):
@@ -98,3 +98,80 @@ class AuthorRepository:
         ).having(
             func.count(Book.goodreads_id) >= min_books
         ).all()
+
+    def get_author_series(
+        self,
+        author_id: str,
+        limit: int = 20,
+        offset: int = 0
+    ) -> tuple[List[tuple[Series, int, List[Book]]], int]:
+        """Get all series that an author has written books in, with book count and first three books.
+        Only includes series where the author's role is 'Author' and the series has more than one book.
+        
+        Args:
+            author_id: The Goodreads ID of the author
+            limit: Maximum number of series to return
+            offset: Number of series to skip
+            
+        Returns:
+            Tuple containing:
+            - List of tuples containing (Series, book_count, first_three_books) ordered by book count desc
+            - Total count of series
+        """
+        # First get the total count of series with more than one book
+        total = (
+            self.session.query(func.count(distinct(Series.goodreads_id)))
+            .select_from(Series)
+            .join(BookSeries, BookSeries.series_id == Series.goodreads_id)
+            .join(Book, Book.work_id == BookSeries.work_id)
+            .join(BookAuthor, BookAuthor.work_id == Book.work_id)
+            .filter(
+                BookAuthor.author_id == author_id,
+                BookAuthor.role == 'Author',  # Only count books where they are the author
+                Book.hidden.is_(False)
+            )
+            .group_by(Series.goodreads_id)
+            .having(func.count(Book.work_id) > 1)  # Only count series with more than one book
+            .count()
+        )
+
+        # Get the series with their book counts
+        series_with_counts = (
+            self.session.query(Series, func.count(Book.work_id).label('book_count'))
+            .select_from(Series)
+            .join(BookSeries, BookSeries.series_id == Series.goodreads_id)
+            .join(Book, Book.work_id == BookSeries.work_id)
+            .join(BookAuthor, BookAuthor.work_id == Book.work_id)
+            .filter(
+                BookAuthor.author_id == author_id,
+                BookAuthor.role == 'Author',  # Only include books where they are the author
+                Book.hidden.is_(False)  # Exclude hidden books from count
+            )
+            .group_by(Series)
+            .having(func.count(Book.work_id) > 1)  # Only include series with more than one book
+            .order_by(desc('book_count'), Series.title)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        # For each series, get the first three books by release date
+        result = []
+        for series, count in series_with_counts:
+            first_three_books = (
+                self.session.query(Book)
+                .join(BookSeries, Book.work_id == BookSeries.work_id)
+                .join(BookAuthor, BookAuthor.work_id == Book.work_id)
+                .filter(
+                    BookSeries.series_id == series.goodreads_id,
+                    BookAuthor.author_id == author_id,
+                    BookAuthor.role == 'Author',  # Only include books where they are the author
+                    Book.hidden.is_(False)
+                )
+                .order_by(Book.published_date.asc().nulls_last())
+                .limit(3)
+                .all()
+            )
+            result.append((series, count, first_three_books))
+
+        return result, total

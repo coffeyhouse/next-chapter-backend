@@ -155,6 +155,14 @@ class AuthorSubscriptionCreate(BaseModel):
 class SeriesSubscriptionCreate(BaseModel):
     series_goodreads_id: str
     
+
+class AuthorSeriesSchema(BaseModel):
+    series: SeriesSchema
+    book_count: int
+    first_three_books: List[BasicBookSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
 DataT = TypeVar('DataT')
 
 class PaginatedResponse(BaseModel, Generic[DataT]):

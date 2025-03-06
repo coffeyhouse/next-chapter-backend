@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import func, desc, and_, or_, case
+from sqlalchemy import func, desc, and_, or_, case, exists, distinct
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from core.sa.models import User, Book, BookUser, Library, BookAuthor, BookSeries, BookSimilar, Series, BookWanted, UserAuthorSubscription, UserSeriesSubscription, Author, Series, BookGenre, Genre
@@ -583,110 +583,108 @@ class UserRepository:
     def get_recommended_books(
         self,
         user_id: int,
-        days: Optional[int] = None,
         limit: int = 20,
         offset: int = 0
-    ) -> List[tuple[Book, int, List[tuple[str, int]]]]:
-        """
-        Get recommended books for a user based on their reading history.
-        Books are scored based on how many times the user has read books in each genre.
-        Only includes published books (where source is not None and published_state is 'published' or None).
-        
-        Args:
-            user_id: The ID of the user
-            days: Optional. If provided, only consider books read within this many days
-            limit: Maximum number of books to return
-            offset: Number of books to skip
-            
-        Returns:
-            List of tuples containing:
-            - Book object
-            - Total score (sum of genre weights)
-            - List of tuples with genre name and score
-        """
-        # Get user's completed books to exclude from recommendations
-        user_completed_subq = (
-            self.session.query(BookUser.work_id)
+    ) -> List[Book]:
+        """Get recommended books based on similar books to what the user has read."""
+        # Get all books the user has completed
+        completed_books = (
+            self.session.query(Book)
+            .join(BookUser)
             .filter(
                 BookUser.user_id == user_id,
-                BookUser.status.in_(["completed", "reading"])
+                BookUser.status == "completed"
             )
-            .subquery()
-        )
-
-        # Calculate genre weights based on user's reading history
-        user_genre_weights = (
-            self.session.query(
-                BookGenre.genre_id,
-                func.count().label("weight")
-            )
-            .join(BookUser, BookUser.work_id == BookGenre.work_id)
-            .join(Genre, BookGenre.genre_id == Genre.id)
-            .filter(
-                BookUser.user_id == user_id,
-                BookUser.status == "completed",
-                Genre.name != "Audiobook"
-            )
+            .all()
         )
         
-        # Add date filter if days parameter is provided
-        if days is not None:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
-            user_genre_weights = user_genre_weights.filter(BookUser.finished_at >= cutoff_date)
-            
-        user_genre_weights = user_genre_weights.group_by(BookGenre.genre_id).subquery()
-
-        # Main query: unread books (i.e. not in user_completed_subq)
-        # Join with BookGenre and the user_genre_weights to calculate a total score per book.
-        query = (
-            self.session.query(
-                Book,
-                func.sum(user_genre_weights.c.weight).label("total_score")
-            )
-            .join(BookGenre, Book.work_id == BookGenre.work_id)
-            .join(user_genre_weights, BookGenre.genre_id == user_genre_weights.c.genre_id)
-            .join(Genre, BookGenre.genre_id == Genre.id)
-            .filter(
-                ~Book.work_id.in_(user_completed_subq),
-                Genre.name != "Audiobook",
-                Book.source != None,  # Only include published books
-                or_(
-                    Book.published_state == "published",
-                    Book.published_state == None
+        # Get all similar books for completed books
+        similar_book_ids = []
+        for book in completed_books:
+            similar_books = (
+                self.session.query(Book)
+                .join(BookSimilar, Book.work_id == BookSimilar.similar_work_id)
+                .filter(
+                    BookSimilar.work_id == book.work_id,
+                    Book.hidden.is_(False)  # Exclude hidden books
                 )
-            )
-            .options(
-                joinedload(Book.book_authors).joinedload(BookAuthor.author),
-                joinedload(Book.book_series).joinedload(BookSeries.series),
-                joinedload(Book.book_wanted)
-            )
-            .group_by(Book.work_id)
-            .having(func.sum(user_genre_weights.c.weight) > 0)
-            .order_by(desc("total_score"), desc(Book.goodreads_votes))
-            .offset(offset)
-            .limit(limit)
-        )
-
-        results = query.all()
-
-        recommended_books = []
-        # For each recommended book, get a breakdown of genre scores
-        for book, total_score in results:
-            breakdown = (
-                self.session.query(
-                    Genre.name,
-                    user_genre_weights.c.weight
-                )
-                .join(BookGenre, Genre.id == BookGenre.genre_id)
-                .join(user_genre_weights, BookGenre.genre_id == user_genre_weights.c.genre_id)
-                .filter(BookGenre.work_id == book.work_id, Genre.name != "Audiobook")
                 .all()
             )
-            # Sort breakdown by weight descending then alphabetically by genre name
-            genre_breakdown = sorted(breakdown, key=lambda x: (-x[1], x[0]))
-            recommended_books.append((book, total_score, genre_breakdown))
-
+            similar_book_ids.extend([book.work_id for book in similar_books])
+        
+        # Count occurrences of each similar book
+        from collections import Counter
+        book_counts = Counter(similar_book_ids)
+        
+        # Get the most frequent similar books, excluding books the user has already read
+        recommended_books = (
+            self.session.query(Book)
+            .filter(
+                Book.work_id.in_([bid for bid, _ in book_counts.most_common()]),
+                Book.hidden.is_(False),  # Exclude hidden books
+                ~exists().where(
+                    and_(
+                        BookUser.work_id == Book.work_id,
+                        BookUser.user_id == user_id
+                    )
+                )
+            )
+            .order_by(
+                # Order by frequency of appearance
+                case(
+                    {work_id: count for work_id, count in book_counts.most_common()},
+                    value=Book.work_id
+                ).desc()
+            )
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        
         return recommended_books
+
+    def count_recommended_books(self, user_id: int) -> int:
+        """Count total number of recommended books for a user."""
+        # Get all books the user has completed
+        completed_books = (
+            self.session.query(Book)
+            .join(BookUser)
+            .filter(
+                BookUser.user_id == user_id,
+                BookUser.status == "completed"
+            )
+            .all()
+        )
+        
+        # Get all similar books for completed books
+        similar_book_ids = []
+        for book in completed_books:
+            similar_books = (
+                self.session.query(Book)
+                .join(BookSimilar, Book.work_id == BookSimilar.similar_work_id)
+                .filter(
+                    BookSimilar.work_id == book.work_id,
+                    Book.hidden.is_(False)  # Exclude hidden books
+                )
+                .all()
+            )
+            similar_book_ids.extend([book.work_id for book in similar_books])
+        
+        # Count unique similar books that user hasn't read
+        return (
+            self.session.query(func.count(distinct(Book.work_id)))
+            .filter(
+                Book.work_id.in_(set(similar_book_ids)),
+                Book.hidden.is_(False),
+                ~exists().where(
+                    and_(
+                        BookUser.work_id == Book.work_id,
+                        BookUser.user_id == user_id
+                    )
+                )
+            )
+            .scalar() or 0
+        )
 
     def get_on_deck_books(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Book]:
         """
@@ -695,6 +693,7 @@ class UserRepository:
         1. Books currently being read
         2. Next unread books in series where the user has read previous books,
            ordered by when the user last read a book in each series
+           (excluding series where a book is currently being read)
         
         Only includes published books (where source is not None and published_state is 'published').
         
@@ -717,7 +716,8 @@ class UserRepository:
                 or_(
                     Book.published_state == "published",
                     Book.published_state == None
-                )
+                ),
+                Book.hidden.is_(False)
             )
             .options(
                 joinedload(Book.book_authors).joinedload(BookAuthor.author),
@@ -727,7 +727,14 @@ class UserRepository:
             .all()
         )
         
+        # Get series IDs where user is currently reading a book
+        reading_series_ids = set()
+        for book in reading_books:
+            for book_series in book.book_series:
+                reading_series_ids.add(book_series.series_id)
+        
         # Get all series where the user has read at least one book, ordered by last read date
+        # Exclude series where user is currently reading a book
         read_series = (
             self.session.query(Series, func.max(BookUser.finished_at).label('last_read'))
             .join(BookSeries)
@@ -740,7 +747,8 @@ class UserRepository:
                 or_(
                     Book.published_state == "published",
                     Book.published_state == None
-                )
+                ),
+                ~Series.goodreads_id.in_(reading_series_ids)  # Exclude series being read
             )
             .group_by(Series)
             .order_by(desc('last_read'))
@@ -759,7 +767,7 @@ class UserRepository:
                     BookSeries.series.has(goodreads_id=series.goodreads_id),
                     BookUser.user_id == user_id,
                     BookUser.status == "completed",
-                    Book.source != None,  # Only include published books
+                    Book.source != None,
                     or_(
                         Book.published_state == "published",
                         Book.published_state == None
@@ -779,7 +787,7 @@ class UserRepository:
                 .filter(
                     BookSeries.series.has(goodreads_id=series.goodreads_id),
                     BookSeries.series_order > max_completed_order,
-                    Book.source != None,  # Only include published books
+                    Book.source != None,
                     or_(
                         Book.published_state == "published",
                         Book.published_state == None
@@ -790,7 +798,8 @@ class UserRepository:
                             BookUser.user_id == user_id,
                             BookUser.status.notin_(["completed", "reading"])
                         )
-                    )
+                    ),
+                    Book.hidden.is_(False)
                 )
                 .options(
                     joinedload(Book.book_authors).joinedload(BookAuthor.author),
@@ -811,7 +820,21 @@ class UserRepository:
         # Apply pagination
         paginated_books = unique_books[offset:offset + limit]
         
-        return paginated_books
+        # Process each book to include user status and wanted state
+        processed_books = []
+        for book in paginated_books:
+            # Determine user's status for this book
+            book_user = next(
+                (bu for bu in book.book_users if bu.user_id == user_id), None
+            )
+            book.user_status = book_user.status if book_user else None
+
+            # Check if the book is in the user's wanted list
+            book.wanted = any(bw.user_id == user_id for bw in book.book_wanted)
+            
+            processed_books.append(book)
+        
+        return processed_books
 
     def add_wanted_book(self, user_id: int, work_id: str, source: str = "manual") -> Optional[BookWanted]:
         """Add a book to the user's wanted list.
@@ -1271,7 +1294,10 @@ class UserRepository:
         return (
             self.session.query(Book)
             .join(BookSeries)
-            .filter(BookSeries.series_id == series_goodreads_id)
+            .filter(
+                BookSeries.series_id == series_goodreads_id,
+                Book.hidden.is_(False)
+            )
             .options(
                 joinedload(Book.book_authors).joinedload(BookAuthor.author),
                 joinedload(Book.book_series).joinedload(BookSeries.series),
@@ -1371,4 +1397,22 @@ class UserRepository:
                 Book.source != None
             )
             .count()
-        ) 
+        )
+
+    def get_book_status(self, user_id: int, goodreads_id: str) -> Optional[BookUser]:
+        """Get the existing book status for a user.
+        
+        Args:
+            user_id: The user's ID
+            goodreads_id: The book's Goodreads ID
+            
+        Returns:
+            The BookUser record if it exists, None otherwise
+        """
+        return (self.session.query(BookUser)
+                .join(Book, Book.work_id == BookUser.work_id)
+                .filter(
+                    BookUser.user_id == user_id,
+                    Book.goodreads_id == goodreads_id
+                )
+                .first()) 

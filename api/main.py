@@ -1,5 +1,5 @@
 # api/main.py
-from typing import List, Optional
+from typing import List, Optional, Union, Dict
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,12 +10,14 @@ from core.sa.repositories.book import BookRepository
 from core.sa.repositories.author import AuthorRepository
 from core.sa.repositories.genre import GenreRepository
 from core.sa.repositories.series import SeriesRepository
+from core.sa.models import Book, Author, Series
 from schemas import (
     UserSchema, UserCreate, BookSchema, BookStatusUpdate, BookUserSchema,
     BookWantedSchema, AuthorSchema, AuthorSubscriptionCreate, SeriesSubscriptionCreate,
     UserAuthorSubscriptionSchema, UserSeriesSubscriptionSchema, GenreSchema, PaginatedResponse,
-    SeriesSchema, BasicBookSchema
+    SeriesSchema, BasicBookSchema, AuthorSeriesSchema
 )
+from datetime import datetime
 
 app = FastAPI()
 
@@ -328,37 +330,26 @@ def get_recommended_books(
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=10, le=100, description="Maximum number of books to return"),
 ):
-    """
-    Get a paginated list of recommended books for the user.
-    """
-    repo = UserRepository(db)
+    """Get recommended books based on similar books to what the user has read."""
+    user_repo = UserRepository(db)
     
-    # Get total number of recommended books
-    total_items = repo.count_similar_books_for_user_reads(user_id)
-
-    # Calculate pagination metadata
-    total_pages = (total_items + limit - 1) // limit
-
-    # Calculate skip (offset) from page
-    skip = (page - 1) * limit
-
-    # Get paginated recommended books
-    recommended_books = repo.get_recommended_books(
+    # Get recommended books and total count
+    books = user_repo.get_recommended_books(
         user_id=user_id,
         limit=limit,
-        offset=skip
+        offset=(page - 1) * limit
     )
-
-    # Extract just the books from the recommendations (ignore scores and breakdowns)
-    books = [book for book, score, breakdown in recommended_books]
-
-    # Construct and return the PaginatedResponse
-    return PaginatedResponse[BasicBookSchema](
-        page=page,
-        total_pages=total_pages,
-        total_items=total_items,
-        data=books,
-    )
+    total_count = user_repo.count_recommended_books(user_id)
+    
+    # Calculate total pages
+    total_pages = (total_count + limit - 1) // limit
+    
+    return {
+        "page": page,
+        "total_pages": total_pages,
+        "total_items": total_count,
+        "data": books
+    }
 
 @app.get("/user/{user_id}/books/on-deck", response_model=PaginatedResponse[BasicBookSchema])
 def get_on_deck_books(
@@ -505,12 +496,64 @@ def get_series_books_with_user_status(
     db: Session = Depends(get_db),
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=10, le=100, description="Maximum number of books to return"),
+    sort_by: str = Query(default="published_date", enum=["published_date", "series_order"], description="Sort by published_date or series_order"),
+    sort_direction: str = Query(default="asc", enum=["asc", "desc"], description="Sort direction (asc or desc)"),
 ):
     repo = UserRepository(db)
     
-    # Get total number of books in series
+    # Get all books in series
     all_books = repo.get_series_books_with_user_status(user_id, series_id)
-    total_items = len(all_books)
+
+    # Filter out books with invalid series_order
+    valid_books = []
+    for book in all_books:
+        series_order = None
+        for bs in book.book_series:
+            if bs.series_id == series_id:
+                series_order = bs.series_order
+                break
+
+        if series_order is None:
+            valid_books.append(book)  # Include books without series_order
+        else:
+            try:
+                float(series_order)  # Try converting to float
+                valid_books.append(book)  # Include if conversion is successful
+            except (ValueError, TypeError):
+                pass  # Exclude if conversion fails
+
+    # Sort books based on sort_by parameter
+    if sort_by == "published_date":
+        if sort_direction == "desc":
+            valid_books.sort(key=lambda b: b.published_date or datetime.min, reverse=True)  # Sort by published_date, newest first
+        else:
+            valid_books.sort(key=lambda b: b.published_date or datetime.max, reverse=False)  # Sort by published_date, oldest first
+    elif sort_by == "series_order":
+        # Need to extract series order from book_series relationship
+        def get_series_order(book: Book):
+            for bs in book.book_series:
+                if bs.series_id == series_id:
+                    try:
+                        order = float(bs.series_order)  # Convert to float if possible
+                        return order
+                    except (ValueError, TypeError):
+                        return None  # Treat as None if not a valid number
+            return None  # Handle cases where series order is not found
+
+        # Separate books with and without series order
+        with_order = [book for book in valid_books if get_series_order(book) is not None]
+        without_order = [book for book in valid_books if get_series_order(book) is None]
+
+        # Sort books with series order
+        with_order.sort(key=get_series_order, reverse=(sort_direction == "desc"))
+
+        # Sort books without series order by published_date (oldest first)
+        without_order.sort(key=lambda b: b.published_date or datetime.max, reverse=False)
+
+        # Combine the two lists
+        valid_books = with_order + without_order
+
+    total_items = len(valid_books)
 
     # Calculate pagination metadata
     total_pages = (total_items + limit - 1) // limit
@@ -519,7 +562,7 @@ def get_series_books_with_user_status(
     skip = (page - 1) * limit
 
     # Get paginated books
-    paginated_books = all_books[skip:skip + limit]
+    paginated_books = valid_books[skip:skip + limit]
 
     # Process each book to include user status, wanted state, and series order
     processed_books = []
@@ -536,10 +579,19 @@ def get_series_books_with_user_status(
         # Process series with their order information
         series_list = []
         for book_series in book.book_series:
+            # series_order = book_series.series_order
+            order = None
+            try:
+                if book_series.series_order is not None:
+                    order = float(book_series.series_order)
+                    order = str(order)  # Convert to string
+            except (ValueError, TypeError):
+                pass  # Keep order as None if conversion fails
+
             # Create a series model with the order included
             series = SeriesSchema.model_validate(book_series.series)
             series_dict = series.model_dump()
-            series_dict['order'] = book_series.series_order
+            series_dict['order'] = order  # Use validated order string
             series_list.append(SeriesSchema.model_validate(series_dict))
 
         # Create the BookSchema with user-specific information
@@ -575,6 +627,50 @@ def get_author(user_id: int, author_id: str, db: Session = Depends(get_db)): #Ad
     if author is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
     return author
+
+@app.get("/user/{user_id}/author/{author_id}/series", response_model=PaginatedResponse[AuthorSeriesSchema])
+def get_author_series(
+    user_id: int,
+    author_id: str,
+    db: Session = Depends(get_db),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=10, le=100, description="Maximum number of series to return"),
+):
+    """
+    Get all series that an author has written books in, with book count and first three books by release date.
+    """
+    repo = AuthorRepository(db)
+    
+    # First check if author exists
+    author = repo.get_by_goodreads_id(author_id)
+    if author is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
+    
+    # Calculate offset from page number
+    offset = (page - 1) * limit
+    
+    # Get series data with pagination
+    series_data, total_items = repo.get_author_series(author_id, limit=limit, offset=offset)
+    
+    # Calculate total pages
+    total_pages = (total_items + limit - 1) // limit
+    
+    # Convert to response schema
+    series_list = [
+        AuthorSeriesSchema(
+            series=SeriesSchema.from_orm(series),
+            book_count=book_count,
+            first_three_books=[BasicBookSchema.from_orm(book) for book in first_three_books]
+        )
+        for series, book_count, first_three_books in series_data
+    ]
+    
+    return PaginatedResponse[AuthorSeriesSchema](
+        page=page,
+        total_pages=total_pages,
+        total_items=total_items,
+        data=series_list
+    )
 
 @app.get("/user/{user_id}/author/{author_id}/books", response_model=PaginatedResponse[BasicBookSchema])
 def get_author_books(
@@ -776,6 +872,55 @@ def get_user_series_subscriptions(
         total_items=total_items,
         data=subscription_data,
     )
+
+@app.get("/search", response_model=Dict[str, List[Union[BasicBookSchema, AuthorSchema, SeriesSchema]]])
+def search(
+    query: str = Query(..., description="Search query"),
+    db: Session = Depends(get_db),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=10, le=100, description="Maximum number of items to return"),
+):
+    """
+    Search across books, authors, and series. Returns results split by type.
+    """
+    book_repository = BookRepository(db)
+    author_repository = AuthorRepository(db)
+
+    book_results = book_repository.search_books(query=query, limit=limit, offset=(page - 1) * limit)
+    book_results = [book for book in book_results if not book.hidden]  # Filter out hidden books
+    author_results = author_repository.search_authors(query=query, limit=limit)
+    series_results = db.query(Series).filter(Series.title.ilike(f"%{query}%")).limit(limit).all()
+
+    # Convert results to schemas
+    book_schemas = [BasicBookSchema.model_validate(book) for book in book_results]
+    author_schemas = [AuthorSchema.model_validate(author) for author in author_results]
+    series_schemas = [SeriesSchema.model_validate(series) for series in series_results]
+
+    return {
+        "books": book_schemas[:limit],
+        "authors": author_schemas[:limit],
+        "series": series_schemas[:limit],
+    }
+
+@app.get("/user/{user_id}/books/upcoming-from-read-authors", response_model=PaginatedResponse[BasicBookSchema])
+def get_upcoming_books_from_read_authors(
+    user_id: int,
+    db: Session = Depends(get_db),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=10, le=100, description="Maximum number of books to return"),
+):
+    """
+    Retrieve upcoming books from authors the user has read.
+    """
+    repo = BookRepository(db)
+    
+    # Fetch books using the new repository method
+    books, total = repo.get_upcoming_books_from_read_authors(user_id, limit=limit, offset=(page - 1) * limit)
+    
+    # Calculate total pages
+    total_pages = (total + limit - 1) // limit
+    
+    return PaginatedResponse(page=page, total_pages=total_pages, total_items=total, data=[BasicBookSchema.from_orm(book) for book in books])
 
 # Main execution
 if __name__ == "__main__":
