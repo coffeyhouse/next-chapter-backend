@@ -7,7 +7,7 @@ from sqlalchemy.types import TypeDecorator
 
 class SafeDateTime(TypeDecorator):
     """Custom DateTime type that handles empty strings as None"""
-    impl = DateTime
+    impl = DateTime(timezone=True)  # Ensure timezone support
     cache_ok = True
 
     def process_bind_param(self, value, dialect):
@@ -23,14 +23,14 @@ class SafeDateTime(TypeDecorator):
 class BookUser(Base, TimestampMixin):
     __tablename__ = 'book_user'
 
-    work_id: Mapped[str] = mapped_column(ForeignKey('book.work_id'), primary_key=True)
+    work_id: Mapped[str] = mapped_column(String(255), ForeignKey('book.work_id'), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('user.id'), primary_key=True)
-    status: Mapped[str] = mapped_column(String)
-    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String(50))
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(SafeDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(SafeDateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(SafeDateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(SafeDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     user = relationship('User', back_populates='book_users')
@@ -44,9 +44,9 @@ class User(Base, TimestampMixin):
     __tablename__ = 'user'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(SafeDateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(SafeDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     book_users = relationship('BookUser', back_populates='user')
@@ -59,11 +59,11 @@ class BookWanted(Base):
     """Books that users want to acquire."""
     __tablename__ = "book_wanted"
     
-    work_id = Column(String, ForeignKey("book.work_id"), primary_key=True)
+    work_id = Column(String(255), ForeignKey("book.work_id"), primary_key=True)
     user_id = Column(Integer, ForeignKey("user.id"), primary_key=True)
-    source = Column(String)  # Where they want to get it from
-    created_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    source = Column(String(50))  # Where they want to get it from
+    created_at = Column(SafeDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(SafeDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     
     # Relationships
     user = relationship("User", back_populates="book_wanted")
@@ -78,10 +78,10 @@ class UserAuthorSubscription(Base):
     __tablename__ = "user_author_subscription"
     
     user_id = Column(Integer, ForeignKey("user.id"), primary_key=True)
-    author_goodreads_id = Column(String, ForeignKey("author.goodreads_id"), primary_key=True)
-    created_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
-    deleted_at = Column(SafeDateTime(timezone=True), nullable=True)
+    author_goodreads_id = Column(String(255), ForeignKey("author.goodreads_id"), primary_key=True)
+    created_at = Column(SafeDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(SafeDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    deleted_at = Column(SafeDateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="author_subscriptions")
@@ -96,10 +96,10 @@ class UserSeriesSubscription(Base):
     __tablename__ = "user_series_subscription"
     
     user_id = Column(Integer, ForeignKey("user.id"), primary_key=True)
-    series_goodreads_id = Column(String, ForeignKey("series.goodreads_id"), primary_key=True)
-    created_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(SafeDateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
-    deleted_at = Column(SafeDateTime(timezone=True), nullable=True)
+    series_goodreads_id = Column(String(255), ForeignKey("series.goodreads_id"), primary_key=True)
+    created_at = Column(SafeDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(SafeDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    deleted_at = Column(SafeDateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="series_subscriptions")
