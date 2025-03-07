@@ -87,6 +87,7 @@ class ProxyManager:
        print(f"Saved {len(self.proxies)} proxies with timestamp")
 
    def get_proxy(self) -> dict:
+       """Get a proxy to use, ensuring proxies are loaded"""
        if not self.proxies:
            self.load_proxies()
            
@@ -102,8 +103,14 @@ class ProxyManager:
                self.proxies.pop(self.current_index)
                if self.current_index >= len(self.proxies):
                    self.current_index = 0
+               # Only reload if we've run out of proxies
+               if not self.proxies:
+                   self.load_proxies()
 
    def _get_next_valid_proxy(self) -> Proxy:
+       if not self.proxies:
+           self.load_proxies()
+           
        start_index = self.current_index
        while True:
            current = self.proxies[self.current_index]
@@ -221,7 +228,7 @@ class ProxyManager:
     return random.choice(browser_profiles)
 
    def get_proxies(self):
-       """Get list of proxies, refreshing if needed"""
-       if self._should_refresh_proxies():
+       """Get list of proxies"""
+       if not self.proxies:
            self.load_proxies()
        return self.proxies
