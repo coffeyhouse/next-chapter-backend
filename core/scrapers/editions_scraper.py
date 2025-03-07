@@ -1,63 +1,32 @@
 # core/scrapers/editions_scraper.py
 from bs4 import BeautifulSoup
-from pathlib import Path
 import re
 from urllib.parse import urlencode
-from ..utils.http import GoodreadsDownloader
+from typing import Dict, Any, List, Optional
+from .base_scraper import BaseScraper
 
-class EditionsScraper:
-    """Scrapes editions from a Goodreads work page"""
+class EditionsScraper(BaseScraper):
+    """Scraper for book editions pages on Goodreads."""
     
     def __init__(self, scrape: bool = False):
-        self.downloader = GoodreadsDownloader(scrape)
+        """
+        Initialize the editions scraper.
+        
+        Args:
+            scrape: Whether to allow live scraping
+        """
+        super().__init__(scrape=scrape)
+        # Tracking flags
         self.has_english_editions = False
         self.has_valid_format = False
         self.has_page_count = False
         self.has_valid_publication = False
     
-    def scrape_editions(self, work_id: str) -> list[dict]:
-        """
-        Get editions from first page of a work
-        Returns list of editions with format:
-        [
-            {
-                'goodreads_id': str,
-                'title': str,
-                'format': str,  # Paperback, Hardcover, etc.
-                'pages': int,
-                'published_date': str,
-                'language': str,
-                'rating': float,
-                'rating_count': int
-            }
-        ]
-        """
-        # Reset all flags
-        self.has_english_editions = False
-        self.has_valid_format = False
-        self.has_page_count = False
-        self.has_valid_publication = False
-        
-        # Get first page content
-        url = self._get_page_url(work_id, 1)
-        if not self.downloader.download_url(url):
-            return []
-        
-        # Read the downloaded page
-        html = self._read_html(work_id, 1)
-        if not html:
-            return []
-        
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-            editions = self._extract_editions(soup)
-            return editions
-            
-        except Exception as e:
-            print(f"Error processing page: {e}")
-            return []
+    def get_url(self, work_id: str) -> str:
+        """Get URL for editions page"""
+        return self.get_page_url(work_id, 1)
     
-    def _get_page_url(self, work_id: str, page: int) -> str:
+    def get_page_url(self, work_id: str, page: int) -> str:
         """Get URL for editions page"""
         base = f"https://www.goodreads.com/work/editions/{work_id}"
         params = {
@@ -68,18 +37,38 @@ class EditionsScraper:
         }
         return f"{base}?{urlencode(params)}"
     
-    def _read_html(self, work_id: str, page: int) -> str:
-        """Read downloaded HTML file"""
-        query = f"page={page}&per_page=100&utf8=%E2%9C%93&expanded=true"
-        path = Path('data/cache/work/editions') / f"{work_id}{query}.html"
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading HTML file: {e}")
-            return None
+    def get_cache_path(self, identifier: str, subdir: str = '', suffix: str = '.html') -> str:
+        """Override to handle the specific cache path format for editions"""
+        # If there's a page parameter in the identifier
+        if '_page_' in identifier:
+            work_id, page = identifier.split('_page_')
+            query = f"page={page}&per_page=100&utf8=%E2%9C%93&expanded=true"
+            return self.cache_dir / f"{work_id}{query}.html"
+        
+        # Default case - first page
+        query = f"page=1&per_page=100&utf8=%E2%9C%93&expanded=true"
+        return self.cache_dir / f"{identifier}{query}.html"
     
-    def _extract_editions(self, soup) -> list:
+    def extract_data(self, soup: BeautifulSoup, work_id: str) -> Dict[str, Any]:
+        """Extract editions data from parsed HTML"""
+        # Reset all tracking flags
+        self.has_english_editions = False
+        self.has_valid_format = False
+        self.has_page_count = False
+        self.has_valid_publication = False
+        
+        editions = self._extract_editions(soup)
+        
+        return {
+            'work_id': work_id,
+            'editions': editions,
+            'has_english_editions': self.has_english_editions,
+            'has_valid_format': self.has_valid_format,
+            'has_page_count': self.has_page_count,
+            'has_valid_publication': self.has_valid_publication
+        }
+    
+    def _extract_editions(self, soup) -> List[Dict[str, Any]]:
         """Extract editions from page"""
         editions = []
         edition_elements = soup.find_all('div', class_='elementList clearFix')
@@ -175,3 +164,25 @@ class EditionsScraper:
                 editions.append(edition)
         
         return editions
+    
+    # Legacy method for backward compatibility
+    def scrape_editions(self, work_id: str) -> List[Dict[str, Any]]:
+        """
+        Get editions from first page of a work
+        Returns list of editions with format:
+        [
+            {
+                'goodreads_id': str,
+                'title': str,
+                'format': str,  # Paperback, Hardcover, etc.
+                'pages': int,
+                'published_date': str,
+                'language': str,
+                'rating': float,
+                'rating_count': int
+            }
+        ]
+        """
+        self.logger.info(f"Scraping editions for work: {work_id}")
+        result = self.scrape(work_id)
+        return result.get('editions', []) if result else []

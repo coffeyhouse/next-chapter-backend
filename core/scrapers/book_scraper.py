@@ -1,150 +1,87 @@
 # core/scrapers/book_scraper.py
 from bs4 import BeautifulSoup
-from pathlib import Path
 import re
 import json
 from datetime import datetime
 import click
-from ..utils.http import GoodreadsDownloader
+from typing import Dict, Any, Optional, List
+from .base_scraper import BaseScraper
 from ..utils.image import download_book_cover
 
-class BookScraper:
-    """Scrapes a book page from Goodreads"""
+class BookScraper(BaseScraper):
+    """Scraper for book pages on Goodreads."""
     
-    def __init__(self, scrape: bool = False, force: bool = False):
-        self.downloader = GoodreadsDownloader(scrape, force)
-        
-    def scrape(self, book_id: str) -> dict:
+    def __init__(self, scrape: bool = False):
         """
-        Get book data from Goodreads book page
-        Expected output:
-        {
-            'goodreads_id': str,
-            'title': str,
-            'work_id': str,
-            'published_date': str,
-            'published_state': str,
-            'language': str,
-            'pages': int,
-            'isbn': str,
-            'goodreads_rating': float,
-            'goodreads_votes': int,
-            'description': str,
-            'image_url': str,
-            'source': str,
-            'hidden': bool,
-            # Relationships (not in books table)
-            'authors': [
-                {
-                    'goodreads_id': str,
-                    'name': str,
-                    'role': str
-                }
-            ],
-            'series': [
-                {
-                    'goodreads_id': str,
-                    'name': str,
-                    'order': float
-                }
-            ],
-            'genres': [
-                {
-                    'name': str
-                }
-            ]
-        }
-        """
-        if click.get_current_context().find_root().params.get('verbose', False):
-            click.echo(click.style(f"Scraping book: {book_id}", fg='cyan'))
+        Initialize the book scraper.
         
-        # Get book page content
-        url = self._get_book_url(book_id)
-        if not self.downloader.download_url(url):
-            click.echo(click.style(f"Failed to download book page for ID: {book_id}", fg='red'), err=True)
-            return None
-            
-        # Parse HTML
-        html = self._read_html(book_id)
-        if not html:
-            return None
-            
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-            book_data = {
-                'goodreads_id': book_id,
-                'title': self._extract_title(soup),
-                'work_id': self._extract_work_id(soup),
-                'description': self._extract_description(soup),
-                'language': None,
-                'pages': None,
-                'isbn': None,
-                'goodreads_rating': None,
-                'goodreads_votes': None,
-                'published_date': None,
-                'published_state': None,
-                'image_url': None,
-                'source': 'scrape',
-                'hidden': False,
-                'format': None
-            }
-            
-            # Extract book details
-            details = self._extract_book_details(soup)
-            book_data.update({
-                'language': details.get('language'),
-                'pages': details.get('pages'),
-                'isbn': details.get('isbn'),
-                'goodreads_rating': details.get('rating'),
-                'goodreads_votes': details.get('rating_count'),
-                'format': details.get('format')
-            })
-            
-            # Get publication date
-            pub_info = self._extract_publication_info(soup)
-            book_data['published_date'] = pub_info.get('date')
-            book_data['published_state'] = pub_info.get('state')
-            
-            # Get relationships
-            book_data['authors'] = self._extract_authors(soup)
-            book_data['series'] = self._extract_series(soup)
-            book_data['genres'] = self._extract_genres(soup)
-            
-            # Get cover image
-            cover_url = self._extract_cover_url(soup)
-            if cover_url:
-                local_path = download_book_cover(book_data['work_id'], cover_url)
-                if local_path:
-                    book_data['image_url'] = local_path
-            
-            return book_data
-            
-        except Exception as e:
-            click.echo(click.style(f"Error parsing book data: {e}", fg='red'), err=True)
-            return None
+        Args:
+            scrape: Whether to allow live scraping
+        """
+        super().__init__(scrape=scrape)
     
-    def _get_book_url(self, book_id: str) -> str:
+    def get_url(self, book_id: str) -> str:
         """Get Goodreads URL for book"""
         return f"https://www.goodreads.com/book/show/{book_id}"
     
-    def _read_html(self, book_id: str) -> str:
-        """Read downloaded HTML file"""
-        path = Path('data/cache/book/show') / f"{book_id}.html"
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            click.echo(click.style(f"Error reading HTML file: {e}", fg='red'), err=True)
-            return None
+    def extract_data(self, soup: BeautifulSoup, book_id: str) -> Dict[str, Any]:
+        """Extract book data from parsed HTML"""
+        book_data = {
+            'goodreads_id': book_id,
+            'title': self._extract_title(soup),
+            'work_id': self._extract_work_id(soup),
+            'description': self._extract_description(soup),
+            'language': None,
+            'pages': None,
+            'isbn': None,
+            'goodreads_rating': None,
+            'goodreads_votes': None,
+            'published_date': None,
+            'published_state': None,
+            'image_url': None,
+            'source': 'scrape',
+            'hidden': False,
+            'format': None
+        }
+        
+        # Extract book details
+        details = self._extract_book_details(soup)
+        book_data.update({
+            'language': details.get('language'),
+            'pages': details.get('pages'),
+            'isbn': details.get('isbn'),
+            'goodreads_rating': details.get('rating'),
+            'goodreads_votes': details.get('rating_count'),
+            'format': details.get('format')
+        })
+        
+        # Get publication date
+        pub_info = self._extract_publication_info(soup)
+        book_data['published_date'] = pub_info.get('date')
+        book_data['published_state'] = pub_info.get('state')
+        
+        # Get relationships
+        book_data['authors'] = self._extract_authors(soup)
+        book_data['series'] = self._extract_series(soup)
+        book_data['genres'] = self._extract_genres(soup)
+        
+        # Get cover image
+        cover_url = self._extract_cover_url(soup)
+        if cover_url and book_data['work_id']:
+            local_path = download_book_cover(book_data['work_id'], cover_url)
+            if local_path:
+                book_data['image_url'] = local_path
+        
+        return book_data
     
-    def _extract_title(self, soup) -> str:
+    def _extract_title(self, soup) -> Optional[str]:
         """Extract book title"""
         title_element = soup.find('h1', attrs={'data-testid': 'bookTitle'})
         if title_element:
             return title_element['aria-label'].replace('Book title:', '').strip()
         return None
     
-    def _extract_description(self, soup) -> str:
+    def _extract_description(self, soup) -> Optional[str]:
         """Extract book description"""
         next_data = soup.find('script', id='__NEXT_DATA__')
         if next_data:
@@ -168,7 +105,8 @@ class BookScraper:
             except (json.JSONDecodeError, KeyError):
                 pass
         return None
-    def _extract_book_details(self, soup) -> dict:
+    
+    def _extract_book_details(self, soup) -> Dict[str, Any]:
         """Extract book details from schema.org data"""
         schema = soup.find('script', {'type': 'application/ld+json'})
         if schema:
@@ -186,7 +124,8 @@ class BookScraper:
                 pass
         return {}
     
-    def _extract_publication_info(self, soup) -> dict:
+    def _extract_publication_info(self, soup) -> Dict[str, Any]:
+        """Extract publication date and state"""
         pub_element = soup.find('p', attrs={'data-testid': 'publicationInfo'})
         if pub_element:
             text = pub_element.text.strip()
@@ -211,14 +150,14 @@ class BookScraper:
                 dt = datetime.strptime(raw_date, "%B %d, %Y")
                 # This produces something like "2021-08-05T00:00:00.000000"
                 result['date'] = dt.isoformat(timespec='microseconds')
-            except Exception as e:
+            except Exception:
                 # If parsing fails, fall back to the raw string
                 result['date'] = raw_date
 
             return result
         return {}
     
-    def _extract_authors(self, soup) -> list:
+    def _extract_authors(self, soup) -> List[Dict[str, Any]]:
         """Extract unique author information"""
         seen_ids = set()  # Track seen author IDs
         authors = []
@@ -259,7 +198,7 @@ class BookScraper:
                 
         return authors
     
-    def _extract_series(self, soup) -> list:
+    def _extract_series(self, soup) -> List[Dict[str, Any]]:
         """Extract all series information (main and additional)"""
         series = []
         
@@ -322,7 +261,7 @@ class BookScraper:
         
         return series
     
-    def _extract_genres(self, soup) -> list:
+    def _extract_genres(self, soup) -> List[Dict[str, Any]]:
         """Extract genre information"""
         genres = []
         next_data = soup.find('script', id='__NEXT_DATA__')
@@ -346,7 +285,7 @@ class BookScraper:
                 pass
         return genres
     
-    def _extract_cover_url(self, soup) -> str:
+    def _extract_cover_url(self, soup) -> Optional[str]:
         """Extract book cover URL"""
         # Try to get from __NEXT_DATA__ first (new Goodreads structure)
         next_data = soup.find('script', id='__NEXT_DATA__')
@@ -395,7 +334,7 @@ class BookScraper:
                 
         return None
     
-    def _extract_work_id(self, soup) -> str:
+    def _extract_work_id(self, soup) -> Optional[str]:
         """Extract work ID for editions/similar books"""
         next_data = soup.find('script', id='__NEXT_DATA__')
         if next_data:        
@@ -408,3 +347,13 @@ class BookScraper:
             except (json.JSONDecodeError, KeyError, AttributeError):
                 pass
         return None
+    
+    # Method to call parent's scrape method to prevent naming conflict
+    def scrape_book(self, book_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get book data from Goodreads book page
+        """
+        if click.get_current_context().find_root().params.get('verbose', False):
+            click.echo(click.style(f"Scraping book: {book_id}", fg='cyan'))
+        
+        return super().scrape(book_id)

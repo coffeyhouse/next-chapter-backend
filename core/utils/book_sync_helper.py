@@ -5,7 +5,7 @@ from core.sa.repositories.book import BookRepository
 from core.sa.models import BookScraped
 from core.resolvers.book_creator import BookCreator
 
-def process_book_ids(session: Session, goodreads_ids: List[str], source: str, scrape: bool = False, force_update: bool = False, force: bool = False):
+def process_book_ids(session: Session, goodreads_ids: List[str], source: str, scrape: bool = False, force_update: bool = False):
     """
     Processes a list of Goodreads IDs:
       - If a book exists in the Book table (by goodreads_id) and force_update is False, it is skipped.
@@ -19,14 +19,13 @@ def process_book_ids(session: Session, goodreads_ids: List[str], source: str, sc
         source: Source of the books
         scrape: Whether to scrape live or use cached data
         force_update: Whether to update existing books
-        force: Whether to force fresh scraping ignoring cache
     
     Returns:
         List of newly created or updated Book objects.
     """
     created_books = []
     book_repo = BookRepository(session)
-    creator = BookCreator(session, scrape=scrape, force=force)
+    creator = BookCreator(session, scrape=scrape)
     
     for gr_id in goodreads_ids:
         # Check if the book already exists by goodreads_id.

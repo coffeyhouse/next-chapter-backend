@@ -1,31 +1,30 @@
+# core/scrapers/base_scraper.py
+
 from bs4 import BeautifulSoup
 from pathlib import Path
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, Dict, List, Any
 import click
 from abc import ABC, abstractmethod
-from ..utils.http import GoodreadsDownloader
-import time
 import json
+import time
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
+import re
+from ..utils.http import GoodreadsDownloader
 
 class BaseScraper(ABC):
     """Base class for all scrapers providing common functionality."""
     
-    def __init__(self, scrape: bool = False, cache_dir: Union[str, Path] = 'data/cache', cache_max_age: int = 3600):
+    def __init__(self, scrape: bool = False):
         """
         Initialize the base scraper.
         
         Args:
-            scrape: Whether to allow live scraping or use only cached data
-            cache_dir: Base directory for caching scraped data
-            cache_max_age: Maximum age in seconds for cache files to be considered fresh
+            scrape: Whether to allow live scraping
         """
         self.downloader = GoodreadsDownloader(scrape)
-        self.cache_dir = Path(cache_dir)
-        self.cache_max_age = cache_max_age  # seconds
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.allow_scraping = scrape
         self._setup_logging()
 
     def _setup_logging(self):
@@ -40,7 +39,7 @@ class BaseScraper(ABC):
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def build_url(self, base: str, params: dict) -> str:
+    def build_url(self, base: str, params: Dict[str, Any]) -> str:
         """
         Construct a URL with query parameters.
         
@@ -53,104 +52,38 @@ class BaseScraper(ABC):
         """
         return f"{base}?{urlencode(params)}"
 
-    def get_cache_path(self, identifier: str, subdir: str = '', suffix: str = '.html') -> Path:
+    def download_url(self, url: str) -> Optional[str]:
         """
-        Get the cache file path for an identifier.
-        
-        Args:
-            identifier: Unique identifier for the item.
-            subdir: Optional subdirectory within cache.
-            suffix: File suffix to use.
-            
-        Returns:
-            Path: The constructed cache path.
-        """
-        path = self.cache_dir
-        if subdir:
-            path = path / subdir
-        return path / f"{identifier}{suffix}"
-
-    def read_cache(self, cache_path: Union[str, Path]) -> Optional[str]:
-        """
-        Read HTML content from cache.
-        
-        Args:
-            cache_path: Path to the cached file.
-            
-        Returns:
-            The cached HTML content as a string, or None if not found/error.
-        """
-        try:
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except FileNotFoundError:
-            self.logger.warning(f"Cache file not found: {cache_path}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error reading cache {cache_path}: {e}")
-            return None
-
-    def write_cache(self, cache_path: Union[str, Path], content: str) -> bool:
-        """
-        Write content to cache.
-        
-        Args:
-            cache_path: Path where to write the cache file.
-            content: The content to cache.
-            
-        Returns:
-            True if write was successful, False otherwise.
-        """
-        try:
-            cache_path = Path(cache_path)
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return True
-        except Exception as e:
-            self.logger.error(f"Error writing cache {cache_path}: {e}")
-            return False
-
-    def is_cache_fresh(self, cache_path: Union[str, Path]) -> bool:
-        """
-        Check if a cache file is fresh based on its modification time.
-        
-        Args:
-            cache_path: Path to the cached file.
-            
-        Returns:
-            True if the cache file exists and is not older than self.cache_max_age.
-        """
-        cache_path = Path(cache_path)
-        if not cache_path.exists():
-            return False
-        file_mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
-        if datetime.now() - file_mtime < timedelta(seconds=self.cache_max_age):
-            return True
-        return False
-
-    def download_url(self, url: str, identifier: str, retries: int = 3) -> bool:
-        """
-        Download a URL and cache the response using an exponential backoff strategy.
+        Download a URL using an exponential backoff strategy.
         
         Args:
             url: The URL to download.
-            identifier: Unique identifier for caching.
-            retries: Number of download attempts before giving up.
             
         Returns:
-            True if download was successful, False otherwise.
+            The downloaded content as a string, or None if download failed.
         """
-        if click.get_current_context().find_root().params.get('verbose', False):
-            click.echo(click.style(f"Downloading: {url}", fg='cyan'))
+        try:
+            if click.get_current_context().find_root().params.get('verbose', False):
+                click.echo(click.style(f"Downloading: {url}", fg='cyan'))
+        except RuntimeError:
+            # No Click context available, skip verbose output
+            pass
+            
+        # If we can't scrape, return None
+        if not self.allow_scraping:
+            self.logger.info(f"Skipping download - scraping disabled: {url}")
+            return None
             
         attempt = 0
         delay = 1  # initial delay in seconds
+        retries = 3
+        
         while attempt < retries:
             try:
-                success = self.downloader.download_url(url)
+                success, content = self.downloader.download_url(url)
                 if success:
-                    return True
+                    return content
+                    
                 attempt += 1
                 self.logger.warning(f"Download attempt {attempt} failed for {url}. Retrying in {delay} seconds.")
                 time.sleep(delay)
@@ -162,7 +95,7 @@ class BaseScraper(ABC):
                 delay *= 2
         
         self.logger.error(f"Failed to download {url} after {retries} attempts")
-        return False
+        return None
 
     def parse_html(self, html: str) -> Optional[BeautifulSoup]:
         """
@@ -193,7 +126,6 @@ class BaseScraper(ABC):
         Returns:
             The cleaned HTML as a string.
         """
-        # Add any common cleaning steps here (e.g., remove unwanted tags)
         return html.strip()
 
     def extract_json(self, element: Optional[BeautifulSoup], default: Optional[dict] = None) -> dict:
@@ -214,6 +146,20 @@ class BaseScraper(ABC):
         except Exception as e:
             self.logger.error(f"Error extracting JSON: {e}")
             return default or {}
+            
+    def extract_id_from_url(self, url: str, pattern: str) -> Optional[str]:
+        """
+        Extract an ID from a URL using a regex pattern.
+        
+        Args:
+            url: The URL to extract from.
+            pattern: Regex pattern to match.
+            
+        Returns:
+            Extracted ID or None if not found.
+        """
+        match = re.search(pattern, url)
+        return match.group(1) if match else None
 
     @abstractmethod
     def get_url(self, identifier: str) -> str:
@@ -230,7 +176,7 @@ class BaseScraper(ABC):
         pass
 
     @abstractmethod
-    def extract_data(self, soup: BeautifulSoup, identifier: str) -> dict:
+    def extract_data(self, soup: BeautifulSoup, identifier: str) -> Dict[str, Any]:
         """
         Extract data from parsed HTML.
         Must be implemented by derived classes.
@@ -244,7 +190,7 @@ class BaseScraper(ABC):
         """
         pass
 
-    def scrape(self, identifier: str) -> Optional[dict]:
+    def scrape(self, identifier: str) -> Optional[Dict[str, Any]]:
         """
         Main scraping method that coordinates the scraping process.
         
@@ -255,20 +201,10 @@ class BaseScraper(ABC):
             A dictionary with the scraped data, or None if scraping failed.
         """
         url = self.get_url(identifier)
-        cache_path = self.get_cache_path(identifier)
+        html = self.download_url(url)
         
-        # Use cache if it exists and is fresh
-        if self.is_cache_fresh(cache_path):
-            self.logger.info(f"Using fresh cache for {identifier}")
-        else:
-            # If cache is stale or missing, download and write to cache
-            if not self.download_url(url, identifier):
-                self.logger.error(f"Failed to download {url}")
-                return None
-        
-        html = self.read_cache(cache_path)
         if not html:
-            self.logger.error(f"Failed to read cache for {identifier}")
+            self.logger.error(f"Failed to download HTML for {identifier}")
             return None
         
         html = self.clean_html(html)
@@ -283,7 +219,7 @@ class BaseScraper(ABC):
             self.logger.error(f"Error extracting data for {identifier}: {e}")
             return None
 
-    def scrape_paginated(self, identifier: str, max_pages: int = None) -> Optional[dict]:
+    def scrape_paginated(self, identifier: str, max_pages: int = None) -> Optional[Dict[str, Any]]:
         """
         Scrape data from paginated content.
         
@@ -305,24 +241,12 @@ class BaseScraper(ABC):
                 
             # Get URL for current page
             url = self.get_page_url(identifier, current_page)
-            cache_path = self.get_cache_path(
-                f"{identifier}_page_{current_page}", 
-                suffix=f"_{urlencode(self.get_pagination_params(current_page))}.html"
-            )
+            html = self.download_url(url)
             
-            # Use cache if fresh, otherwise download
-            if not self.is_cache_fresh(cache_path):
-                if not self.download_url(url, identifier):
-                    if all_items:  # Return what we have if not first page
-                        break
-                    self.logger.error(f"Failed to download page {current_page}")
-                    return None
-            
-            # Read and parse page
-            html = self.read_cache(cache_path)
             if not html:
-                if all_items:
+                if all_items:  # Return what we have if not first page
                     break
+                self.logger.error(f"Failed to download page {current_page}")
                 return None
                 
             html = self.clean_html(html)
@@ -364,11 +288,11 @@ class BaseScraper(ABC):
             **metadata
         }
 
-    @abstractmethod
     def get_page_url(self, identifier: str, page: int) -> str:
         """
         Get URL for a specific page.
-        Must be implemented by derived classes.
+        Default implementation adds page parameter to base URL.
+        Can be overridden by derived classes.
         
         Args:
             identifier: The identifier being scraped
@@ -377,9 +301,11 @@ class BaseScraper(ABC):
         Returns:
             The URL for the specified page
         """
-        pass
+        base_url = self.get_url(identifier)
+        params = self.get_pagination_params(page)
+        return f"{base_url}?{urlencode(params)}" if params else base_url
 
-    def get_pagination_params(self, page: int) -> dict:
+    def get_pagination_params(self, page: int) -> Dict[str, Any]:
         """
         Get pagination parameters for URL.
         Can be overridden by derived classes.
@@ -394,11 +320,11 @@ class BaseScraper(ABC):
             'page': page
         }
 
-    @abstractmethod
-    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> list:
+    def extract_page_data(self, soup: BeautifulSoup, identifier: str) -> List[Dict[str, Any]]:
         """
         Extract items from a single page.
-        Must be implemented by derived classes.
+        Default implementation returns an empty list.
+        Should be overridden by derived classes.
         
         Args:
             soup: The parsed HTML
@@ -407,9 +333,9 @@ class BaseScraper(ABC):
         Returns:
             List of items from the page
         """
-        pass
+        return []
 
-    def extract_metadata(self, soup: BeautifulSoup, identifier: str) -> dict:
+    def extract_metadata(self, soup: BeautifulSoup, identifier: str) -> Dict[str, Any]:
         """
         Extract metadata from first page.
         Can be overridden by derived classes.
@@ -423,7 +349,7 @@ class BaseScraper(ABC):
         """
         return {}
 
-    def extract_pagination(self, soup: BeautifulSoup) -> Optional[dict]:
+    def extract_pagination(self, soup: BeautifulSoup) -> Optional[Dict[str, int]]:
         """
         Extract pagination information.
         Can be overridden by derived classes.

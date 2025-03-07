@@ -7,12 +7,21 @@ from ..exclusions import should_exclude_book, get_exclusion_reason
 from datetime import datetime, UTC
 
 class BookCreator:
-    def __init__(self, session: Session, scrape: bool = False, force: bool = False):
+    """Creates and updates book records in the database."""
+    
+    def __init__(self, session: Session, scrape: bool = False):
+        """
+        Initialize the book creator.
+        
+        Args:
+            session: SQLAlchemy session
+            scrape: Whether to allow live scraping
+        """
         self.session = session
         # Create tables if they don't exist
         Base.metadata.create_all(session.get_bind())
         self.book_repository = BookRepository(session)
-        self.resolver = BookResolver(scrape=scrape, force=force)
+        self.resolver = BookResolver(scrape=scrape)
 
     def create_book_from_goodreads(self, goodreads_id: str, source: str = 'goodreads') -> Optional[Book]:
         """

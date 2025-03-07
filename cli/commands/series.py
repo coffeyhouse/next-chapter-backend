@@ -83,14 +83,15 @@ def sync_sa(days: int, limit: int, source: str, goodreads_id: str, scrape: bool,
                                          "Failed to scrape series data", 'red')
                         continue
                     
+                    # Update last_synced_at since we got valid series data
+                    update_last_synced(series, session)
+                    
                     # Collect all Goodreads IDs from the series books
                     goodreads_ids = [b['goodreads_id'] for b in series_data['books']]
                     created_books = process_book_ids(session, goodreads_ids, source='series', scrape=scrape)
                     for _ in created_books:
                         tracker.increment_imported()
 
-                    # Update series last_synced_at
-                    update_last_synced(series, session)
                     tracker.increment_processed()
                     
                 except Exception as e:

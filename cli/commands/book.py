@@ -474,8 +474,7 @@ def rescrape_stale(limit: Optional[int], verbose: bool, force: bool, days: int, 
                     [book.goodreads_id], 
                     source=book.source or 'rescrape',  # Use original source if available
                     scrape=True,
-                    force_update=True,
-                    force=force  # Pass through the force parameter
+                    force_update=True
                 )
                 
                 if updated_books:

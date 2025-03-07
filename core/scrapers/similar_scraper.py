@@ -1,62 +1,35 @@
 # core/scrapers/similar_scraper.py
 from bs4 import BeautifulSoup
-from pathlib import Path
 import re
-from ..utils.http import GoodreadsDownloader
+from typing import Dict, Any, List, Optional
+from .base_scraper import BaseScraper
 
-class SimilarScraper:
-    """Scrapes similar books from Goodreads"""
+class SimilarScraper(BaseScraper):
+    """Scraper for similar books pages on Goodreads."""
     
     def __init__(self, scrape: bool = False):
-        self.downloader = GoodreadsDownloader(scrape)
-    
-    def scrape_similar_books(self, work_id: str) -> list[dict]:
         """
-        Get similar books for a given book
-        Returns list of books with format:
-        [
-            {
-                'goodreads_id': str,
-                'title': str
-            }
-        ]
-        """
-        print(f"Scraping similar books for: {work_id}")
+        Initialize the similar books scraper.
         
-        # Get page content
-        url = self._get_page_url(work_id)
-        if not self.downloader.download_url(url):
-            print(f"Failed to download similar books page for ID: {work_id}")
-            return []
-            
-        # Read the downloaded page
-        html = self._read_html(work_id)
-        if not html:
-            return []
-            
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-            return self._extract_similar_books(soup)
-            
-        except Exception as e:
-            print(f"Error processing similar books: {e}")
-            return []
+        Args:
+            scrape: Whether to allow live scraping
+        """
+        super().__init__(scrape=scrape)
     
-    def _get_page_url(self, work_id: str) -> str:
+    def get_url(self, work_id: str) -> str:
         """Get URL for similar books page"""
         return f"https://www.goodreads.com/book/similar/{work_id}"
     
-    def _read_html(self, work_id: str) -> str:
-        """Read downloaded HTML file"""
-        path = Path('data/cache/book/similar') / f"{work_id}.html"
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading HTML file: {e}")
-            return None
+    def extract_data(self, soup: BeautifulSoup, work_id: str) -> Dict[str, Any]:
+        """Extract similar books data from parsed HTML"""
+        similar_books = self._extract_similar_books(soup)
+        
+        return {
+            'work_id': work_id,
+            'similar_books': similar_books
+        }
     
-    def _extract_similar_books(self, soup) -> list:
+    def _extract_similar_books(self, soup) -> List[Dict[str, Any]]:
         """Extract similar books from page"""
         similar_books = []
         book_divs = soup.find_all('div', class_='u-paddingBottomXSmall')
@@ -86,3 +59,19 @@ class SimilarScraper:
                 similar_books.append(book)
         
         return similar_books
+    
+    # Legacy method for backward compatibility
+    def scrape_similar_books(self, work_id: str) -> List[Dict[str, Any]]:
+        """
+        Get similar books for a given book
+        Returns list of books with format:
+        [
+            {
+                'goodreads_id': str,
+                'title': str
+            }
+        ]
+        """
+        self.logger.info(f"Scraping similar books for: {work_id}")
+        result = self.scrape(work_id)
+        return result.get('similar_books', []) if result else []

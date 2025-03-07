@@ -8,8 +8,14 @@ from typing import Optional, Dict, Any
 class BookResolver:
     """Resolves book data from Goodreads"""
     
-    def __init__(self, scrape: bool = False, force: bool = False):
-        self.scraper = BookScraper(scrape=scrape, force=force)
+    def __init__(self, scrape: bool = False):
+        """
+        Initialize the book resolver.
+        
+        Args:
+            scrape: Whether to allow live scraping
+        """
+        self.scraper = BookScraper(scrape=scrape)
         self.editions_scraper = EditionsScraper(scrape=scrape)
 
     def resolve_book(self, goodreads_id: str) -> Optional[Dict[str, Any]]:
