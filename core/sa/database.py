@@ -1,23 +1,39 @@
 # core/sa/database.py
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Dict, Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, QueuePool
+import os
 
 from core.sa.models import Base
 
 class Database:
-    def __init__(self, db_path: str = "books.db"):
+    def __init__(self, connection_string: Optional[str] = None, **engine_kwargs):
         """Initialize database connection
         
         Args:
-            db_path: Path to SQLite database file
+            connection_string: Database connection string (e.g., "postgresql://user:pass@localhost/books")
+                              If None, will use the DATABASE_URL environment variable or fall back to SQLite
+            engine_kwargs: Additional keyword arguments to pass to create_engine
         """
+        self.connection_string = connection_string or os.getenv("DATABASE_URL", "sqlite:///books.db")
+        self.is_sqlite = self.connection_string.startswith("sqlite")
+        
+        # SQLite-specific settings
+        if self.is_sqlite:
+            engine_kwargs.setdefault("connect_args", {"check_same_thread": False})
+            engine_kwargs.setdefault("poolclass", NullPool)  # SQLite typically doesn't need connection pooling
+            
+        # PostgreSQL recommended settings
+        else:
+            engine_kwargs.setdefault("pool_size", 5)
+            engine_kwargs.setdefault("max_overflow", 10)
+            engine_kwargs.setdefault("poolclass", QueuePool)
+            
         self.engine = create_engine(
-            f"sqlite:///{db_path}",
-            connect_args={"check_same_thread": False},  # Allow SQLite to be used across threads
-            poolclass=StaticPool
+            self.connection_string,
+            **engine_kwargs
         )
         
         # Create sessionmaker
